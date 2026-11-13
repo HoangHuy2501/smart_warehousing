@@ -100,9 +100,9 @@ Body: `{ actorId, poId, slotCode, qty, note? }`
 Response **201** — created/updated `ILotV2` (status `WAITING_IQC`).
 
 ### POST `/lots/:id/iqc` — inject IQC decision (simulated T8 push)
-Body: `{ actorId, decision: 'PASS'|'FAIL_PENDING'|'EXEMPT'|'PARTIAL_PASS'|'RETURN'|'AOD', qtyInStock?, qtyReturn? }`
-- `PARTIAL_PASS` requires `qtyInStock` + `qtyReturn` = lot qty.
+Body: `{ actorId, decision: 'PASS'|'FAIL_PENDING'|'EXEMPT'|'RETURN' }`
 - Applies the decision down to each active allocation of the lot; `FAIL_PENDING` keeps `WAITING_IQC` + `hasWarning: true`.
+- Production path: IQC Auto Sync Worker (T8 `adj_result`/`pro_result` → `PASS` / `EXEMPT` / `FAIL_ACCEPT` / `FAIL_RETURN`, status `WAITING_STOCK` / `RETURNED`).
 
 Response **201** — updated `ILotV2` (with `iqcHistory`).
 
@@ -160,6 +160,6 @@ Returns **409** `{ error: { code: "BUSINESS_ERROR", message: "reset_disabled" } 
 3. `npm install && npm start`, open `/api-docs` and try the flow:
    - `GET /` → note account ids (seeded EMP001–EMP003 or your own `whs_user_role` rows)
    - `GET /pos?bucket=today` → pick an arrived PO
-   - `POST /assign` (actor = KEEPER) → `POST /lots/:id/iqc` (decision PASS / PARTIAL_PASS…)
+   - `POST /assign` (actor = KEEPER) → `POST /lots/:id/iqc` (decision PASS / EXEMPT…)
    - `POST /lots/:id/move`, `PATCH /slots/:code`, account endpoints as above
 4. Expected error paths worth testing: assign to locked slot (403 `slot_locked`), non-keeper creating slot (403 `no_permission`), `POST /reset` (409).

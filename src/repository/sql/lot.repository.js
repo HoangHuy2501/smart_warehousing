@@ -889,7 +889,7 @@ class LotModel {
   /**
    * Áp kết quả IQC: patch gồm status, iqc_decision, has_warning,
    * qty_in_stock, qty_return, qty_aod, last_iqc_at và warehouse_status
-   * ('IN' / 'RETURN' / 'AOD'; FAIL_PENDING vẫn 'TEMP_IN'). Ủy quyền cho
+   * ('IN' / 'RETURN'; FAIL_PENDING vẫn 'TEMP_IN'). Ủy quyền cho
    * updateAllocation (1 UPDATE + 1 REFETCH).
    * @param {string} id PK của allocation
    * @param {Record<string, unknown>} patch các cột kết quả IQC

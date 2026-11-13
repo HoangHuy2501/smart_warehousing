@@ -32,9 +32,7 @@
  * Máy trạng thái IQC (status FE + warehouse_status kho):
  *   PASS / EXEMPT   → IN_STOCK  + 'IN'
  *   FAIL_PENDING    → giữ WAITING_IQC + has_warning = 1, warehouse 'TEMP_IN'
- *   PARTIAL_PASS    → IN_STOCK  + 'IN' (tách qty_in_stock / qty_return)
  *   RETURN          → RETURNED  + 'RETURN'
- *   AOD             → AOD_PENDING + 'AOD'
  * Kết quả IQC được áp lên allocation (nguồn thật) và mirror xuống receipt;
  * phần tách số lượng chỉ mirror khi allocation có ĐÚNG 1 receipt (nhận
  * vật không ambiguous), nhiều receipt → chỉ cập nhật quyết định + qc_date.
@@ -79,9 +77,7 @@ const DECISION_TO_ADJ = {
   PASS: '1',
   FAIL_PENDING: '2',
   EXEMPT: '3',
-  PARTIAL_PASS: '4',
   RETURN: '5',
-  AOD: '6',
 };
 
 
@@ -232,11 +228,11 @@ class LotServices {
    * như cũ (không báo not_found).
    *
    * @param {string} lotId - id allocation (prefix 'lot-')
-   * @param {object} dto - { actorId, decision, qtyInStock?, qtyReturn? }
+   * @param {object} dto - { actorId, decision }
    * @returns {Promise<object>} Allocation sau khi áp IQC (shape ILotV2)
    * @throws {ApiError} iqc_manual_disabled (403) trên DB_MODE=sqlserver;
    *   not_found (404) nếu allocation đóng/không tồn tại; dup_iqc nếu lặp
-   *   lại đúng quyết định cũ; qty_mismatch khi tách số lượng
+   *   lại đúng quyết định cũ
    */
   async injectIqcResult(lotId, dto) {
     // (#6) MANUAL IQC = T8 SIMULATOR ONLY: endpoint này là đường IQC
@@ -296,29 +292,6 @@ class LotServices {
         nextWarning = true;
         badQty = lot.qty;
         break;
-      case 'PARTIAL_PASS': {
-        // Mặc định 80% nhập kho nếu FE không truyền số lượng tách.
-        const inStock =
-          dto.qtyInStock !== undefined
-            ? Number(dto.qtyInStock)
-            : Math.floor(lot.qty * 0.8);
-        const returned =
-          dto.qtyReturn !== undefined
-            ? Number(dto.qtyReturn)
-            : lot.qty - inStock;
-        if (Math.abs(inStock + returned - lot.qty) > 1e-9) {
-          err('qty_mismatch');
-        }
-        nextStatus = 'IN_STOCK';
-        nextWarehouse = 'IN';
-        nextInStock = inStock;
-        nextReturn = returned;
-        nextAod = null;
-        nextWarning = false;
-        checkQty = inStock;
-        returnQty = returned;
-        break;
-      }
       case 'RETURN':
         nextStatus = 'RETURNED';
         nextWarehouse = 'RETURN';
@@ -327,15 +300,6 @@ class LotServices {
         nextAod = null;
         nextWarning = false;
         returnQty = lot.qty;
-        break;
-      case 'AOD':
-        nextStatus = 'AOD_PENDING';
-        nextWarehouse = 'AOD';
-        nextInStock = null;
-        nextReturn = null;
-        nextAod = lot.qty;
-        nextWarning = false;
-        badQty = lot.qty;
         break;
       default:
         err('not_found', 404);

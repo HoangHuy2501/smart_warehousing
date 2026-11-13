@@ -63,7 +63,7 @@ const IQC_HISTORY_SCHEMA = {
   items: {
     type: 'object',
     properties: {
-      decision: { type: 'string', enum: ['PASS', 'FAIL_PENDING', 'EXEMPT', 'PARTIAL_PASS', 'RETURN', 'AOD'] },
+      decision: { type: 'string', enum: ['PASS', 'FAIL_PENDING', 'EXEMPT', 'FAIL_ACCEPT', 'FAIL_RETURN', 'RETURN'] },
       time: { type: 'string', format: 'date-time' },
     },
   },
@@ -92,12 +92,12 @@ const LOT_SCHEMA = {
     assignedAt: { type: 'string', format: 'date-time', nullable: true },
     status: {
       type: 'string',
-      enum: ['PO_RECEIVED', 'WAITING_IQC', 'IN_STOCK', 'RETURNED', 'AOD_PENDING'],
+      enum: ['PO_RECEIVED', 'WAITING_IQC', 'WAITING_STOCK', 'IN_STOCK', 'RETURNED'],
     },
     iqcDecision: {
       type: 'string',
       nullable: true,
-      enum: ['PASS', 'FAIL_PENDING', 'EXEMPT', 'PARTIAL_PASS', 'RETURN', 'AOD', null],
+      enum: ['PASS', 'FAIL_PENDING', 'EXEMPT', 'FAIL_ACCEPT', 'FAIL_RETURN', 'RETURN', null],
     },
     hasWarning: { type: 'boolean', nullable: true },
     qtyInStock: { type: 'number', nullable: true },
@@ -603,7 +603,7 @@ function buildSwaggerSpec() {
           description:
             'SIMULATOR ONLY (DB_MODE=memory / test): tren DB_MODE=sqlserver that endpoint tra loi 403 iqc_manual_disabled va KHONG cap nhat whs_slot_allocation / whs_allocation_receipt / T8 — production chi chay IQC Auto Sync Worker. ' +
             'Neu allocation chua match notice (PO_ASSIGNED): he thong tu tao t8_pur_notice1 + t8_pur_notice2 (T8 simulator) roi confirm allocation (TEMP_IN) truoc khi ap IQC. ' +
-            'State machine (SIMULATOR — KHONG phai business production): PASS/EXEMPT -> IN_STOCK + warehouse IN; FAIL_PENDING -> giu WAITING_IQC + has_warning; PARTIAL_PASS -> IN_STOCK + tach so luong; RETURN -> RETURNED + warehouse RETURN; AOD -> AOD_PENDING + warehouse AOD.',
+            'State machine (SIMULATOR — KHONG phai business production): PASS/EXEMPT -> IN_STOCK + warehouse IN; FAIL_PENDING -> giu WAITING_IQC + has_warning; RETURN -> RETURNED + warehouse RETURN. Production: IQC Auto Sync Worker (adj_result/pro_result) tao WAITING_STOCK / RETURNED / FAIL_ACCEPT / FAIL_RETURN.',
           parameters: [
             {
               name: 'id',
@@ -622,6 +622,7 @@ function buildSwaggerSpec() {
               },
             },
             400: ERROR_RESPONSE,
+            403: ERROR_RESPONSE,
             404: ERROR_RESPONSE,
           },
         },
@@ -1203,20 +1204,12 @@ function buildSwaggerSpec() {
           type: 'object',
           required: ['decision'],
           description:
-            'T8 SIMULATOR ONLY — production (DB_MODE=sqlserver) tra loi 403 iqc_manual_disabled; IQC that den tu T8 qua IQC Auto Sync Worker theo adj_result/pro_result. Enum PARTIAL_PASS / AOD / FAIL_PENDING la simulator-only, khong co trong business production.',
+            'T8 SIMULATOR ONLY — production (DB_MODE=sqlserver) tra loi 403 iqc_manual_disabled; IQC that den tu T8 qua IQC Auto Sync Worker theo adj_result/pro_result (PASS / EXEMPT / FAIL_ACCEPT / FAIL_RETURN). Enum FAIL_PENDING la simulator-only, khong co trong business production.',
           properties: {
             decision: {
               type: 'string',
-              enum: ['PASS', 'FAIL_PENDING', 'EXEMPT', 'PARTIAL_PASS', 'RETURN', 'AOD'],
+              enum: ['PASS', 'FAIL_PENDING', 'EXEMPT', 'RETURN'],
               description: 'SIMULATOR enum — khong ap dung cho production T8.',
-            },
-            qtyInStock: {
-              type: 'number',
-              description: 'Chi dung cho PARTIAL_PASS — so luong nhap kho',
-            },
-            qtyReturn: {
-              type: 'number',
-              description: 'Chi dung cho PARTIAL_PASS — so luong tra hang',
             },
           },
         },
