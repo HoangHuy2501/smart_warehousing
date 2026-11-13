@@ -1,5 +1,10 @@
 /**
- * IQC SYNC TARGETED TEST (cases A–Q) — CHỈ chạy với DB_MODE=test-postgres.
+ * IQC SYNC TARGETED TEST (cases A–T) — CHỈ chạy với DB_MODE=test-postgres.
+ *
+ * Quy tắc vàng: IQC chạy TRƯỚC GRN — KHÔNG test nào được tạo
+ * pur_in1 / pur_in2 (GRN) để làm in_qty = sheet_qty. Các case
+ * PASS / EXEMPT / FAIL_ACCEPT / multi-allocation PASS / partial phải
+ * chứng minh IQC MATCHED ngay khi in_qty = 0 (chưa có GRN).
  *
  * Không cần HTTP server / Redis: gọi thẳng
  *   repository/sql/iqc-sync.repository.js (primitive đọc candidate + state)
@@ -18,10 +23,14 @@
 
 process.env.DB_MODE = process.env.DB_MODE || 'test-postgres';
 
+const fs = require('fs');
+const path = require('path');
+
 const db = require('../src/config/db');
 const { TABLES } = require('../src/repository/sql/tables');
 const IqcSyncRepository = require('../src/repository/sql/iqc-sync.repository');
 const iqcSyncService = require('../src/services/iqc-sync.service');
+const { manualIqcDisabled } = require('../src/services/lot.service');
 
 const STATES = iqcSyncService.IQC_SYNC_STATES;
 
@@ -45,15 +54,22 @@ function check(name, cond, extra) {
 
 const NOTICE_ID_BASE = 990000;
 let noticeSeq = 0;
-let grnSeq = 0;
 let allocationSeq = 0;
 let receiptSeq = 0;
 
 let slotCode = null;
 let createdSlot = false;
 let empNo = null;
-let grnHeaderId = null;
-let createdGrnHeader = false;
+
+// File source IQC — dùng cho case S/T (static guard: không IN_STOCK,
+// không ghi T8).
+const IQC_SOURCE_FILES = [
+    'src/services/iqc-sync.service.js',
+    'src/services/jobs/iqc-sync.job.js',
+    'src/worker/iqc-sync.worker.js',
+    'src/repository/sql/iqc-sync.repository.js',
+    'src/queues/iqc-sync.queue.js',
+].map((file) => path.join(__dirname, '..', file));
 
 /** Tìm (hoặc tạo) 1 kệ dùng cho allocation test. */
 async function ensureSlot() {
@@ -84,27 +100,6 @@ async function ensureEmpNo() {
     );
     empNo = rows.length > 0 ? rows[0].emp_no : 'TEST-KPR';
     return empNo;
-}
-
-/** Header pur_in1 dùng làm sheet_id cho pur_in2 test (nếu DB có FK). */
-async function ensureGrnHeader() {
-    if (grnHeaderId) return grnHeaderId;
-    const { rows } = await db.query(
-        `SELECT id FROM ${TABLES.in1} ORDER BY id LIMIT 1`
-    );
-    if (rows.length > 0) {
-        grnHeaderId = rows[0].id;
-        return grnHeaderId;
-    }
-    grnHeaderId = NOTICE_ID_BASE + 9000;
-    await db.query(
-        `INSERT INTO ${TABLES.in1}
-      (id, sheet_no, sheet_date, su_no, emp_no, st_no, sheet_sta, check_sta)
-     VALUES (?, 'IQCT-GRNH-1', NOW(), 'IQCT-SU', 'IQCT-EMP', '01', 'Y', 'Y')`,
-        [grnHeaderId]
-    );
-    createdGrnHeader = true;
-    return grnHeaderId;
 }
 
 /**
@@ -147,31 +142,6 @@ async function createNotice(options) {
         ]
     );
     return notice;
-}
-
-/** Seed GRN detail (pur_in2) — view tính in_qty = SUM(sheet_qty) theo notice. */
-async function addGrn(notice, qty) {
-    const seq = (grnSeq += 1);
-    const headerId = await ensureGrnHeader();
-    await db.query(
-        `INSERT INTO ${TABLES.in2}
-      (id, sheet_id, sheet_no, notice_no, notice_id, pur_no, pur_id, goods_no,
-       unit_no, st_no, sheet_qty, made_lot, sheet_lot)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'KG', '01', ?, ?, ?)`,
-        [
-            NOTICE_ID_BASE + 5000 + seq,
-            headerId,
-            `IQCT-GRN-${seq}`,
-            `IQCT-PN-${seq}`,
-            notice.id,
-            notice.purNo,
-            notice.purId,
-            notice.goodsNo,
-            Number(qty),
-            notice.madeLot,
-            notice.madeLot,
-        ]
-    );
 }
 
 /**
@@ -248,7 +218,6 @@ async function readReceipts(allocationId) {
 /** Dựng đủ fixture 1 notice + 1 allocation + 1 receipt (full lot). */
 async function fixtureSingle(options) {
     const notice = await createNotice(options.notice);
-    if (options.grnQty) await addGrn(notice, options.grnQty);
     const allocationId = await createAllocation(options.allocation);
     await addReceipt({
         allocationId,
@@ -267,10 +236,6 @@ async function cleanup() {
     );
     await db.query(`DELETE FROM ${TABLES.allocation} WHERE id LIKE 'iqct-%'`);
     await db.query(`DELETE FROM ${TABLES.notice2} WHERE sheet_no LIKE 'IQCT-%'`);
-    await db.query(`DELETE FROM ${TABLES.in2} WHERE sheet_no LIKE 'IQCT-GRN-%'`);
-    if (createdGrnHeader) {
-        await db.query(`DELETE FROM ${TABLES.in1} WHERE sheet_no LIKE 'IQCT-GRNH-%'`);
-    }
     if (createdSlot) {
         await db.query(`DELETE FROM ${TABLES.slots} WHERE code = ?`, [slotCode]);
     }
@@ -304,10 +269,43 @@ async function runCases() {
         allocAfterA
     );
 
+    // ---- A2. Còn 1 receipt chưa lot → sweep KHÔNG enqueue (harden) ----
+    // Allocation có receipt có lot + receipt chưa lot (2 notice khác
+    // nhau — UQ (allocation_id, notice_detail_id)) → sweep phải bỏ qua.
+    const noticeA2a = await createNotice({ sheetQty: 30, adjResult: '1' });
+    const noticeA2b = await createNotice({ sheetQty: 20 });
+    const allocA2 = await createAllocation({ allocatedQty: 50 });
+    await addReceipt({
+        allocationId: allocA2,
+        noticeId: noticeA2a.id,
+        receivedQty: 30,
+        lotNo: noticeA2a.madeLot,
+    });
+    await addReceipt({
+        allocationId: allocA2,
+        noticeId: noticeA2b.id,
+        receivedQty: 20,
+        lotNo: null,
+    });
+    const candidatesA2 = await IqcSyncRepository.findIqcPendingAllocations(
+        500,
+        null
+    );
+    check(
+        'A2: còn 1 receipt chưa lot → sweep không enqueue allocation',
+        !candidatesA2.some((row) => row.allocationId === allocA2),
+        candidatesA2.map((row) => row.allocationId).slice(0, 5)
+    );
+    const resultA2 = await iqcSyncService.syncAllocation(allocA2);
+    check(
+        'A2: service guard hasLot → WAITING_IQC (không spam waiting_lot)',
+        resultA2.state === STATES.WAITING_IQC,
+        resultA2
+    );
+
     // ---- B. adj_result = 0 → WAITING, không đổi qty ----
     const b = await fixtureSingle({
         notice: { sheetQty: 100, adjResult: '0' },
-        grnQty: 100,
         receivedQty: 100,
     });
     const resultB = await iqcSyncService.syncAllocation(b.allocationId);
@@ -323,30 +321,44 @@ async function runCases() {
     );
     check('B: allocation giữ WAITING_IQC', allocB.status === 'WAITING_IQC', allocB);
 
-    // ---- C. PASS ----
+    // ---- C. PASS, NO GRN, in_qty = 0 (acceptance bắt buộc) ----
+    // Spec: sheet_qty 100, in_qty 0 (chưa GRN), return_qty 0, adj_result 1,
+    // receipt.received_qty 60 → PASS, qty_in_stock = 60, WAITING_STOCK.
     const c = await fixtureSingle({
         notice: {
             sheetQty: 100,
             adjResult: '1',
             qcDate: '2026-11-10T08:00:00+07:00',
         },
-        grnQty: 100,
-        receivedQty: 100,
+        receivedQty: 60,
     });
+    const { rows: in2RowsC } = await db.query(
+        `SELECT COUNT(*) AS n FROM ${TABLES.in2} WHERE notice_id = ?`,
+        [c.notice.id]
+    );
+    check(
+        'C: NO GRN — không có pur_in2 cho notice (in_qty = 0)',
+        Number(in2RowsC[0].n) === 0,
+        in2RowsC[0]
+    );
     const resultC = await iqcSyncService.syncAllocation(c.allocationId);
     const receiptsC = await readReceipts(c.allocationId);
     const allocC = await readAllocation(c.allocationId);
-    check('C: PASS → MATCHED', resultC.state === STATES.MATCHED, resultC);
     check(
-        'C: receipt PASS qty_in_stock = received_qty',
+        'C: PASS TRƯỚC GRN (in_qty = 0) → vẫn MATCHED',
+        resultC.state === STATES.MATCHED,
+        resultC
+    );
+    check(
+        'C: receipt PASS qty_in_stock = received_qty (60)',
         receiptsC[0].iqcDecision === 'PASS' &&
-        Number(receiptsC[0].qtyInStock) === 100 &&
+        Number(receiptsC[0].qtyInStock) === 60 &&
         Number(receiptsC[0].qtyReturn) === 0,
         receiptsC[0]
     );
     check(
-        'C: allocation WAITING_STOCK_APPROVAL / TEMP_IN',
-        allocC.status === 'WAITING_STOCK_APPROVAL' &&
+        'C: allocation WAITING_STOCK / TEMP_IN',
+        allocC.status === 'WAITING_STOCK' &&
         allocC.warehouseStatus === 'TEMP_IN',
         allocC
     );
@@ -354,7 +366,6 @@ async function runCases() {
     // ---- D. EXEMPT ----
     const d = await fixtureSingle({
         notice: { sheetQty: 40, adjResult: '3', qcDate: '2026-11-10T09:00:00+07:00' },
-        grnQty: 40,
         receivedQty: 40,
     });
     const resultD = await iqcSyncService.syncAllocation(d.allocationId);
@@ -367,8 +378,8 @@ async function runCases() {
         receiptsD[0]
     );
     check(
-        'D: allocation WAITING_STOCK_APPROVAL',
-        allocD.status === 'WAITING_STOCK_APPROVAL',
+        'D: allocation WAITING_STOCK',
+        allocD.status === 'WAITING_STOCK',
         allocD
     );
 
@@ -380,7 +391,6 @@ async function runCases() {
             proResult: '2',
             qcDate: '2026-11-10T10:00:00+07:00',
         },
-        grnQty: 50,
         receivedQty: 50,
     });
     const resultE = await iqcSyncService.syncAllocation(e.allocationId);
@@ -393,8 +403,8 @@ async function runCases() {
         receiptsE[0]
     );
     check(
-        'E: allocation WAITING_STOCK_APPROVAL',
-        resultE.state === STATES.MATCHED && allocE.status === 'WAITING_STOCK_APPROVAL',
+        'E: allocation WAITING_STOCK',
+        resultE.state === STATES.MATCHED && allocE.status === 'WAITING_STOCK',
         [resultE, allocE]
     );
 
@@ -438,8 +448,6 @@ async function runCases() {
         adjResult: '1',
         qcDate: '2026-11-10T12:05:00+07:00',
     });
-    await addGrn(noticeG1, 60);
-    await addGrn(noticeG2, 40);
     const allocG = await createAllocation({ allocatedQty: 100 });
     await addReceipt({
         allocationId: allocG,
@@ -459,9 +467,9 @@ async function runCases() {
     const sumInG = receiptsG.reduce((sum, r) => sum + Number(r.qtyInStock || 0), 0);
     check('G: 2 receipt PASS → SUM qty_in_stock = 100', sumInG === 100, receiptsG);
     check(
-        'G: allocation WAITING_STOCK_APPROVAL + iqc_decision PASS',
+        'G: allocation WAITING_STOCK + iqc_decision PASS',
         resultG.state === STATES.MATCHED &&
-        allocGAfter.status === 'WAITING_STOCK_APPROVAL' &&
+        allocGAfter.status === 'WAITING_STOCK' &&
         allocGAfter.iqcDecision === 'PASS',
         allocGAfter
     );
@@ -479,7 +487,6 @@ async function runCases() {
         returnQty: 30,
         qcDate: '2026-11-10T13:10:00+07:00',
     });
-    await addGrn(noticeH1, 70);
     const allocH = await createAllocation({ allocatedQty: 100 });
     await addReceipt({
         allocationId: allocH,
@@ -506,9 +513,9 @@ async function runCases() {
         sumReturnH,
     });
     check(
-        'H: allocation WAITING_STOCK_APPROVAL + MIXED',
+        'H: allocation WAITING_STOCK + MIXED',
         resultH.state === STATES.MATCHED &&
-        allocHAfter.status === 'WAITING_STOCK_APPROVAL' &&
+        allocHAfter.status === 'WAITING_STOCK' &&
         allocHAfter.iqcDecision === 'MIXED',
         allocHAfter
     );
@@ -520,7 +527,6 @@ async function runCases() {
         qcDate: '2026-11-10T14:00:00+07:00',
     });
     const noticeI2 = await createNotice({ sheetQty: 20, adjResult: '0' });
-    await addGrn(noticeI1, 20);
     const allocI = await createAllocation({ allocatedQty: 40 });
     await addReceipt({
         allocationId: allocI,
@@ -549,7 +555,6 @@ async function runCases() {
         adjResult: '1',
         qcDate: '2026-11-10T15:00:00+07:00',
     });
-    await addGrn(noticeJ, 100);
     const allocJ1 = await createAllocation({ allocatedQty: 60 });
     const allocJ2 = await createAllocation({ allocatedQty: 40 });
     await addReceipt({
@@ -575,7 +580,7 @@ async function runCases() {
         [receiptsJ1[0], receiptsJ2[0]]
     );
     check(
-        'J: cả 2 allocation WAITING_STOCK_APPROVAL',
+        'J: cả 2 allocation WAITING_STOCK',
         resultJ1.state === STATES.MATCHED && resultJ2.state === STATES.MATCHED,
         [resultJ1, resultJ2]
     );
@@ -628,7 +633,6 @@ async function runCases() {
             returnQty: 30,
             qcDate: '2026-11-10T16:00:00+07:00',
         },
-        grnQty: 70,
         receivedQty: 100,
     });
     const resultL = await iqcSyncService.syncAllocation(l.allocationId);
@@ -648,7 +652,6 @@ async function runCases() {
         returnQty: 30,
         qcDate: '2026-11-10T16:30:00+07:00',
     });
-    await addGrn(noticeM, 70);
     const allocM1 = await createAllocation({ allocatedQty: 60 });
     const allocM2 = await createAllocation({ allocatedQty: 40 });
     await addReceipt({
@@ -688,15 +691,14 @@ async function runCases() {
     const resultN = await iqcSyncService.syncAllocation('iqct-al-missing');
     check('N: allocation missing → NO_OP', resultN.state === STATES.NO_OP, resultN);
 
-    // ---- O. Allocation đã WAITING_STOCK_APPROVAL → old job NO_OP ----
+    // ---- O. Allocation đã WAITING_STOCK → old job NO_OP ----
     const noticeO = await createNotice({
         sheetQty: 30,
         adjResult: '1',
         qcDate: '2026-11-10T17:00:00+07:00',
     });
-    await addGrn(noticeO, 30);
     const allocO = await createAllocation({
-        status: 'WAITING_STOCK_APPROVAL',
+        status: 'WAITING_STOCK',
         warehouseStatus: 'TEMP_IN',
         allocatedQty: 30,
     });
@@ -711,7 +713,7 @@ async function runCases() {
     check(
         'O: status đã tiến → NO_OP, không rollback',
         resultO.state === STATES.NO_OP &&
-        allocOAfter.status === 'WAITING_STOCK_APPROVAL',
+        allocOAfter.status === 'WAITING_STOCK',
         [resultO, allocOAfter]
     );
 
@@ -724,7 +726,6 @@ async function runCases() {
     } catch {
         unknownNotice = await createNotice({ sheetQty: 25, adjResult: '9' });
     }
-    await addGrn(unknownNotice, 25);
     const allocP = await createAllocation({ allocatedQty: 25 });
     await addReceipt({
         allocationId: allocP,
@@ -758,9 +759,38 @@ async function runCases() {
     check(
         'Q: trạng thái cuối không đổi (status đã tiến → lần 2 NO_OP)',
         resultQ.state === STATES.NO_OP &&
-        allocQ.status === 'WAITING_STOCK_APPROVAL',
+        allocQ.status === 'WAITING_STOCK',
         [resultQ, allocQ]
     );
+
+    // ---- R. Manual IQC endpoint: DB_MODE=sqlserver → blocked ----
+    check(
+        'R: manual IQC disable khi DB_MODE=sqlserver',
+        manualIqcDisabled('sqlserver') === true
+    );
+    check(
+        'R: manual IQC còn mở cho simulator (memory / test-postgres)',
+        manualIqcDisabled('memory') === false &&
+        manualIqcDisabled('test-postgres') === false
+    );
+
+    // ---- S. IQC worker không có path nào set IN_STOCK ----
+    for (const file of IQC_SOURCE_FILES) {
+        const content = fs.readFileSync(file, 'utf8');
+        check(
+            `S: ${path.basename(file)} không set IN_STOCK`,
+            !/(['"])IN_STOCK\1/.test(content)
+        );
+    }
+
+    // ---- T. IQC worker không ghi T8 (READ ONLY) ----
+    for (const file of IQC_SOURCE_FILES) {
+        const content = fs.readFileSync(file, 'utf8');
+        check(
+            `T: ${path.basename(file)} không có INSERT/UPDATE/DELETE t8_*`,
+            !/\b(INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+t8_/i.test(content)
+        );
+    }
 }
 
 (async () => {

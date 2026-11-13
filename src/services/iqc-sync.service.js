@@ -22,12 +22,15 @@
  *   khóa. 0 dòng → WAITING_IQC; >1 dòng → warning, KHÔNG TOP 1, KHÔNG
  *   fallback goods_no + lot hay pur_no + goods_no.
  * - Quantity KHÔNG double-count: một notice có thể chia nhiều allocation.
- *     full accept (in_qty ≈ sheet_qty, return_qty = 0)
+ *   KHÔNG phụ thuộc GRN in_qty — IQC chạy TRƯỚC GRN, in_qty chỉ phản ánh
+ *   đơn nhập kho đã ghi (được SELECT nhưng KHÔNG dùng để classify):
+ *     full accept (return_qty ≈ 0)
  *       → mỗi receipt: qty_in_stock = received_qty, qty_return = 0
- *     full return (in_qty = 0, return_qty ≈ sheet_qty)
+ full return (return_qty ≈ sheet_qty)
  *       → mỗi receipt: qty_in_stock = 0, qty_return = received_qty
  *     partial: CHỈ nhận số tuyệt đối khi notice thuộc đúng 1 allocation
- *       và receipt.received_qty ≈ sheet_qty → in_qty / return_qty.
+ *       và receipt.received_qty ≈ sheet_qty → qty_in_stock =
+ *       sheet_qty - return_qty, qty_return = return_qty.
  *       Partial + multi-allocation → KHÔNG chia tỷ lệ/FIFO/LIFO → giữ
  *       WAITING_IQC + has_warning (state PARTIAL_AMBIGUOUS).
  * - Receipt chỉ ghi: iqc_decision, qty_in_stock, qty_return, qc_date,
@@ -189,19 +192,22 @@ function mapIqcDecision(iqcRow) {
 }
 
 /**
- * Phân loại số lượng của notice T8. Partial = không rơi vào full accept
- * hay full return → cần kiểm tra multi-allocation trước khi ghi.
- * @param {{ sheetQty: unknown, inQty: unknown, returnQty: unknown }} iqcRow
+ * Phân loại hình thái số lượng của notice T8 — CHỈ theo return_qty so với
+ * sheet_qty. KHÔNG dùng in_qty để classify: IQC chạy TRƯỚC GRN nên PASS/
+ * EXEMPT/FAIL_ACCEPT hợp lệ ngay cả khi in_qty = 0 (GRN chưa nhập);
+ * in_qty chỉ phản ánh GRN đã ghi, được SELECT nhưng không tham gia quyết
+ * định. Partial = không rơi vào full accept hay full return → cần kiểm
+ * tra multi-allocation trước khi ghi.
+ * @param {{ sheetQty: unknown, returnQty: unknown }} iqcRow
  * @returns {string} QUANTITY_SHAPE
  */
 function classifyQuantity(iqcRow) {
     const sheetQty = Number(iqcRow.sheetQty || 0);
-    const inQty = Number(iqcRow.inQty || 0);
     const returnQty = Number(iqcRow.returnQty || 0);
-    if (nearlyEqual(inQty, sheetQty) && nearlyEqual(returnQty, 0)) {
+    if (nearlyEqual(returnQty, 0)) {
         return QUANTITY_SHAPE.FULL_ACCEPT;
     }
-    if (nearlyEqual(inQty, 0) && nearlyEqual(returnQty, sheetQty)) {
+    if (nearlyEqual(returnQty, sheetQty)) {
         return QUANTITY_SHAPE.FULL_RETURN;
     }
     return QUANTITY_SHAPE.PARTIAL;
@@ -209,20 +215,24 @@ function classifyQuantity(iqcRow) {
 
 /**
  * Dựng patch IQC cho 1 receipt. Số lượng lấy từ receipt.received_qty
- * (KHÔNG copy in_qty của notice vào mọi allocation) trừ nhánh partial
- * single-allocation dùng đúng in_qty/return_qty tuyệt đối.
+ * (KHÔNG copy in_qty của notice vào mọi allocation); nhánh partial
+ * single-allocation ghi số tuyệt đối theo notice: qty_in_stock =
+ * sheet_qty - return_qty, qty_return = return_qty (KHÔNG dùng in_qty —
+ * giá trị đó phụ thuộc GRN, IQC chạy trước GRN).
  * @param {{ receivedQty: unknown }} receipt
- * @param {{ sheetQty: unknown, inQty: unknown, returnQty: unknown, qcDate: unknown }} iqcRow
+* @param {{ sheetQty: unknown, returnQty: unknown, qcDate: unknown }} iqcRow
  * @param {{ decision: string, shape: string }} entry
  * @param {Date} updatedAt
  * @returns {Record<string, unknown>}
  */
 function buildReceiptIqcPatch(receipt, iqcRow, entry, updatedAt) {
     if (entry.shape === QUANTITY_SHAPE.PARTIAL) {
+        const sheetQty = Number(iqcRow.sheetQty || 0);
+        const returnQty = Number(iqcRow.returnQty || 0);
         return {
             iqc_decision: entry.decision,
-            qty_in_stock: Number(iqcRow.inQty || 0),
-            qty_return: Number(iqcRow.returnQty || 0),
+            qty_in_stock: sheetQty - returnQty,
+            qty_return: returnQty,
             qc_date: iqcRow.qcDate ?? null,
             has_warning: false,
             updated_at: updatedAt,
@@ -408,7 +418,6 @@ async function buildReceiptPlan(receipts) {
                     activeAllocations,
                     receivedQty: receipt.receivedQty,
                     sheetQty: iqcRow.sheetQty,
-                    inQty: iqcRow.inQty,
                     returnQty: iqcRow.returnQty,
                 });
                 return {

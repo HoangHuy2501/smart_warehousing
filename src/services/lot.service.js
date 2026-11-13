@@ -8,8 +8,10 @@
  * Nghiệp vụ chính + đọc danh sách:
  *   1. assignShelf     : THỦ KHO gán PO lên kệ — INSERT allocation trực tiếp
  *                        từ pur_order2, KHÔNG cho pur_notice2.
- *   2. injectIqcResult : nhận kết quả IQC (giả lập T8 push) → chạy máy
- *                        trạng thái IQC + warehouse_status.
+ *   2. injectIqcResult : T8 SIMULATOR ONLY (giả lập T8 push) → chạy máy
+ *                        trạng thái IQC + warehouse_status; DB_MODE=
+ *                        sqlserver → 403 iqc_manual_disabled, production
+ *                        chỉ chạy IQC Auto Sync Worker.
  *   3. moveLot         : chuyển một phần / toàn bộ số lượng sang kệ khác.
  *   4. getLots         : danh sách allocation (JOIN order2/order1 làm nguồn
  *                        chính; lot chi tiết nằm ở whs_allocation_receipt).
@@ -222,18 +224,26 @@ class LotServices {
   }
 
   /**
-   * Nhận quyết định IQC cho 1 allocation (giả lập T8 đẩy kết quả).
-   * Trước khi áp: thử đồng bộ receipt (allocation x notice) — mapping
-   * chỉ được tạo khi không ambiguous; nếu chưa có notice / ambiguous
-   * thì vẫn áp kết quả IQC lên allocation như cũ (không báo not_found).
+   * Nhận quyết định IQC cho 1 allocation (T8 SIMULATOR — giả lập T8 đẩy
+   * kết quả). DB_MODE=sqlserver → 403 iqc_manual_disabled (T8 thật chỉ
+   * được IQC Auto Sync xử lý). Trước khi áp: thử đồng bộ receipt
+   * (allocation x notice) — mapping chỉ được tạo khi không ambiguous;
+   * nếu chưa có notice / ambiguous thì vẫn áp kết quả IQC lên allocation
+   * như cũ (không báo not_found).
    *
    * @param {string} lotId - id allocation (prefix 'lot-')
    * @param {object} dto - { actorId, decision, qtyInStock?, qtyReturn? }
    * @returns {Promise<object>} Allocation sau khi áp IQC (shape ILotV2)
-   * @throws {ApiError} not_found (404) nếu allocation đóng/không tồn tại;
-   *   dup_iqc nếu lặp lại đúng quyết định cũ; qty_mismatch khi tách số lượng
+   * @throws {ApiError} iqc_manual_disabled (403) trên DB_MODE=sqlserver;
+   *   not_found (404) nếu allocation đóng/không tồn tại; dup_iqc nếu lặp
+   *   lại đúng quyết định cũ; qty_mismatch khi tách số lượng
    */
   async injectIqcResult(lotId, dto) {
+    // (#6) MANUAL IQC = T8 SIMULATOR ONLY: endpoint này là đường IQC
+    // giả lập cho memory/test — trên DB_MODE=sqlserver thật phải tắt để
+    // không bypass IQC Auto Sync (IQC Worker là luồng production duy
+    // nhất, và KHÔNG path nào được set IN_STOCK từ manual IQC).
+    if (manualIqcDisabled(db.getMode())) err('iqc_manual_disabled', 403);
     const actor = await shared.getActor(dto.actorId);
     let lot = await LotRepository.byId(lotId);
     if (!lot || lot.closedAt) err('not_found', 404);
@@ -819,4 +829,16 @@ class LotServices {
   }
 }
 
+
+/**
+ * Manual IQC (T8 simulator) có bị tắt trên DB thật hay không.
+ * Đứng ngoài class để test import mà không cần instance/DB.
+ * @param {string} dbMode - giá trị DB_MODE hiện tại
+ * @returns {boolean} true khi manual IQC bị disable (sqlserver)
+ */
+function manualIqcDisabled(dbMode) {
+  return dbMode === 'sqlserver';
+}
+
 module.exports = new LotServices();
+module.exports.manualIqcDisabled = manualIqcDisabled;

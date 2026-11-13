@@ -11,7 +11,10 @@
  * Nhóm primitive:
  *   SWEEP
  *     - findIqcPendingAllocations(limit, cursor) : keyset cursor, chỉ
- *       allocation còn mở + status WAITING_IQC + EXISTS receipt có lot.
+ *       allocation còn mở + status WAITING_IQC + có receipt AND TẤT CẢ
+ *       receipt của allocation đã có lot (NOT EXISTS receipt chưa lot):
+ *       allocation có receipt chưa lot sẽ KHÔNG được enqueue — tránh spam
+ *       IQC sync rồi trả waiting_lot.
  *   ĐỌC WHS
  *     - findAllocationForIqc(allocationId, query?) : recheck trong tx.
  *     - findReceiptsForAllocation(allocationId, query?) : receipt mapping.
@@ -164,8 +167,11 @@ class IqcSyncRepository {
         SELECT 1
         FROM whs_allocation_receipt r
         WHERE r.allocation_id = a.id
-          AND r.lot_no IS NOT NULL
-          AND LTRIM(RTRIM(r.lot_no)) <> ''
+      AND NOT EXISTS (
+        SELECT 1
+        FROM whs_allocation_receipt r
+        WHERE r.allocation_id = a.id
+          AND (r.lot_no IS NULL OR LTRIM(RTRIM(r.lot_no)) = '')
       )${keyset}
     ORDER BY a.allocated_at ASC, a.id ASC
     OFFSET 0 ROWS FETCH NEXT ? ROWS ONLY;

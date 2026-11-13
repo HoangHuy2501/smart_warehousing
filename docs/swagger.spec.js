@@ -599,10 +599,11 @@ function buildSwaggerSpec() {
         post: {
           tags: ['Lots'],
           summary:
-            'Nhan ket qua IQC cho lo hang (gia lap T8 day ket qua)',
+            'T8 SIMULATOR ONLY — nhan ket qua IQC cho lo hang (gia lap T8 day ket qua)',
           description:
+            'SIMULATOR ONLY (DB_MODE=memory / test): tren DB_MODE=sqlserver that endpoint tra loi 403 iqc_manual_disabled va KHONG cap nhat whs_slot_allocation / whs_allocation_receipt / T8 — production chi chay IQC Auto Sync Worker. ' +
             'Neu allocation chua match notice (PO_ASSIGNED): he thong tu tao t8_pur_notice1 + t8_pur_notice2 (T8 simulator) roi confirm allocation (TEMP_IN) truoc khi ap IQC. ' +
-            'State machine: PASS/EXEMPT -> IN_STOCK + warehouse IN; FAIL_PENDING -> giu WAITING_IQC + has_warning; PARTIAL_PASS -> IN_STOCK + tach so luong; RETURN -> RETURNED + warehouse RETURN; AOD -> AOD_PENDING + warehouse AOD.',
+            'State machine (SIMULATOR — KHONG phai business production): PASS/EXEMPT -> IN_STOCK + warehouse IN; FAIL_PENDING -> giu WAITING_IQC + has_warning; PARTIAL_PASS -> IN_STOCK + tach so luong; RETURN -> RETURNED + warehouse RETURN; AOD -> AOD_PENDING + warehouse AOD.',
           parameters: [
             {
               name: 'id',
@@ -1201,10 +1202,13 @@ function buildSwaggerSpec() {
         IqcDto: {
           type: 'object',
           required: ['decision'],
+          description:
+            'T8 SIMULATOR ONLY — production (DB_MODE=sqlserver) tra loi 403 iqc_manual_disabled; IQC that den tu T8 qua IQC Auto Sync Worker theo adj_result/pro_result. Enum PARTIAL_PASS / AOD / FAIL_PENDING la simulator-only, khong co trong business production.',
           properties: {
             decision: {
               type: 'string',
               enum: ['PASS', 'FAIL_PENDING', 'EXEMPT', 'PARTIAL_PASS', 'RETURN', 'AOD'],
+              description: 'SIMULATOR enum — khong ap dung cho production T8.',
             },
             qtyInStock: {
               type: 'number',
