@@ -778,14 +778,15 @@ async function runCases() {
         [resultQ, allocQ]
     );
 
-    // ---- R. Recheck completed and returned lots until they enter stock ----
+    // ---- R. Recheck completed lots; stop when returned or in stock ----
     const recheck = await fixtureSingle({ notice: { sheetQty: 100, adjResult: '1' } });
     await iqcSyncService.syncAllocation(recheck.allocationId);
     const corrections = [
         { adj: '2', pro: '2', returned: 30, status: 'WAITING_STOCK', received: 70 },
-        { adj: '2', pro: '0', returned: 100, status: 'RETURNED', received: 0 },
         { adj: '3', pro: '0', returned: 0, status: 'WAITING_STOCK', received: 100 },
         { adj: '0', pro: '0', returned: 0, status: 'WAITING_IQC', received: 0 },
+        { adj: '1', pro: '0', returned: 0, status: 'WAITING_STOCK', received: 100 },
+        { adj: '2', pro: '0', returned: 100, status: 'RETURNED', received: 0 },
     ];
     for (const correction of corrections) {
         const candidates = await IqcSyncRepository.findIqcPendingAllocations(200);
@@ -808,6 +809,22 @@ async function runCases() {
             (!waiting || result.state === STATES.WAITING_IQC),
             { result, allocation, receipt });
     }
+
+    const returnedCandidates = await IqcSyncRepository.findIqcPendingAllocations(200);
+    check('R: sweep excludes an open RETURNED lot',
+        !returnedCandidates.some((row) => row.allocationId === recheck.allocationId),
+        returnedCandidates);
+    await db.query(
+        `UPDATE ${TABLES.notice2} SET adj_result = '1', return_qty = 0 WHERE id = ?`,
+        [recheck.notice.id]
+    );
+    const returnedJob = await iqcSyncService.syncAllocation(recheck.allocationId);
+    const returnedLot = await readAllocation(recheck.allocationId);
+    check('R: a queued job leaves RETURNED status and quantities intact',
+        returnedJob.state === STATES.NO_OP && returnedJob.reason === 'status_advanced' &&
+        returnedLot.status === 'RETURNED' && returnedLot.qtyReturn === 100 &&
+        returnedLot.qtyInStock === 0,
+        { returnedJob, returnedLot });
 
     // ---- U. Quyết định và số lượng mâu thuẫn, hoặc lượng trả ngoài giới hạn ----
     const invalidCases = [

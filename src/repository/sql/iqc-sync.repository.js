@@ -4,7 +4,7 @@
  * Repository IQC Sync — primitive đọc T8 (READ ONLY) + đọc/ghi WHS.
  *
  * Tách khỏi receipt-sync.repository vì vòng đời khác (allocation đã ở
- * WAITING_IQC / WAITING_STOCK / RETURNED, receipt đã có lot) — không copy business decision nào:
+ * WAITING_IQC / WAITING_STOCK, receipt đã có lot) — không copy business decision nào:
  * mapping adj_result/pro_result, chia quantity, derive status đều nằm ở
  * services/iqc-sync.service.js.
  *
@@ -162,7 +162,7 @@ class IqcSyncRepository {
       a.allocated_at AS [allocatedAt]
     FROM whs_slot_allocation a
     WHERE a.closed_at IS NULL
-      AND a.status IN ('WAITING_IQC', 'WAITING_STOCK', 'RETURNED')
+      AND a.status IN ('WAITING_IQC', 'WAITING_STOCK')
       AND COALESCE(a.warehouse_status, '') <> 'IN'
       AND EXISTS (
         SELECT 1

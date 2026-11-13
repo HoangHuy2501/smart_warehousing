@@ -320,7 +320,8 @@ function blockedReason(allocation) {
     if (!allocation) return 'allocation_missing';
     if (allocation.closedAt) return 'allocation_closed';
     if (allocation.warehouseStatus === WAREHOUSE_STATUS.IN ||
-        !Object.values(ALLOCATION_STATUS).includes(allocation.status)) {
+        (allocation.status !== ALLOCATION_STATUS.WAITING_IQC &&
+            allocation.status !== ALLOCATION_STATUS.WAITING_STOCK)) {
         return 'status_advanced';
     }
     return null;

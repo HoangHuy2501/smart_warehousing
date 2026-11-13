@@ -1810,7 +1810,7 @@ function makeMemoryRepository() {
         const pending = data.allocations.filter((a) => {
           if (a.closed_at !== null) return false;
           if (a.warehouse_status === 'IN' ||
-              !['WAITING_IQC', 'WAITING_STOCK', 'RETURNED'].includes(a.status)) return false;
+              !['WAITING_IQC', 'WAITING_STOCK'].includes(a.status)) return false;
           if (!keysetAfter(a, cursor)) return false;
           const receipts = data.receipts.filter((r) => r.allocation_id === a.id);
           return receipts.length > 0 && receipts.every((r) => hasLotValue(r.lot_no));
