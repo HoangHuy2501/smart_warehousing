@@ -18,7 +18,7 @@
  *   ĐỌC WHS
  *     - findAllocationForIqc(allocationId, query?) : recheck trong tx.
  *     - findReceiptsForAllocation(allocationId, query?) : receipt mapping.
- *     - countActiveAllocationsByNoticeIds(noticeIds) : phát hiện 1 notice
+ *     - countActiveAllocationsByNoticeIds(noticeIds, query?) : phát hiện 1 notice
  *       đang chia cho nhiều allocation (partial IQC không được tự chia).
  *   ĐỌC T8 (READ ONLY — KHÔNG BAO GIỜ GHI)
  *     - findNoticeIdentitiesByIds(noticeDetailIds) : pur_notice2 identity.
@@ -167,6 +167,7 @@ class IqcSyncRepository {
         SELECT 1
         FROM whs_allocation_receipt r
         WHERE r.allocation_id = a.id
+      )
       AND NOT EXISTS (
         SELECT 1
         FROM whs_allocation_receipt r
@@ -258,7 +259,7 @@ class IqcSyncRepository {
      * @param {number[]} noticeDetailIds
      * @returns {Promise<Array<{ noticeDetailId: number, activeAllocations: number }>>}
      */
-    async countActiveAllocationsByNoticeIds(noticeDetailIds) {
+    async countActiveAllocationsByNoticeIds(noticeDetailIds, query = db.query) {
         if (!Array.isArray(noticeDetailIds) || noticeDetailIds.length === 0) {
             return [];
         }
@@ -274,7 +275,7 @@ class IqcSyncRepository {
   `;
         const params = noticeDetailIds.slice();
         guardParams(params);
-        const { rows } = await db.query(toDialect(sql), params);
+        const { rows } = await query(toDialect(sql), params);
         return rows;
     }
 
@@ -323,7 +324,7 @@ class IqcSyncRepository {
      * @returns {Promise<Array<{
      *   sheetNo: string, sheetId: number, purNo: string, purId: number,
      *   goodsNo: string, madeLot: string, sheetQty: number,
-     *   inQty: number | null, returnQty: number | null,
+     *   returnQty: number | null,
      *   adjResult: unknown, proResult: unknown, qcDate: unknown
      * }>>}
      */
@@ -347,7 +348,6 @@ class IqcSyncRepository {
       iqc.goods_no AS [goodsNo],
       iqc.made_lot AS [madeLot],
       CAST(iqc.sheet_qty AS FLOAT) AS [sheetQty],
-      CAST(iqc.in_qty AS FLOAT) AS [inQty],
       CAST(iqc.return_qty AS FLOAT) AS [returnQty],
       iqc.adj_result AS [adjResult],
       iqc.pro_result AS [proResult],

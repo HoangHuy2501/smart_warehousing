@@ -39,6 +39,25 @@ services:
     restart: unless-stopped
     stop_grace_period: 40s
 
+  iqc-worker:
+    build: .
+    init: true
+    env_file: .env
+    environment:
+      NODE_ENV: development
+      DB_MODE: sqlserver
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      REDIS_TLS: "false"
+    volumes:
+      - .:/app
+      - /app/node_modules
+    command: ./node_modules/.bin/nodemon -L --signal SIGTERM --watch src --ext js,json --delay 1 src/worker/iqc-sync.worker.js
+    depends_on:
+      - redis
+    restart: unless-stopped
+    stop_grace_period: 40s
+
   ngrok:
     image: ngrok/ngrok:latest
     environment:

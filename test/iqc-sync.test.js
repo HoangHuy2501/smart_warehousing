@@ -1,5 +1,5 @@
 /**
- * IQC SYNC TARGETED TEST (cases A–T) — CHỈ chạy với DB_MODE=test-postgres.
+ * IQC SYNC TARGETED TEST (cases A–W) — CHỈ chạy với DB_MODE=test-postgres.
  *
  * Quy tắc vàng: IQC chạy TRƯỚC GRN — KHÔNG test nào được tạo
  * pur_in1 / pur_in2 (GRN) để làm in_qty = sheet_qty. Các case
@@ -30,6 +30,7 @@ const db = require('../src/config/db');
 const { TABLES } = require('../src/repository/sql/tables');
 const IqcSyncRepository = require('../src/repository/sql/iqc-sync.repository');
 const iqcSyncService = require('../src/services/iqc-sync.service');
+const OverviewService = require('../src/services/overview.service');
 const { manualIqcDisabled } = require('../src/services/lot.service');
 
 const STATES = iqcSyncService.IQC_SYNC_STATES;
@@ -308,6 +309,18 @@ async function runCases() {
         notice: { sheetQty: 100, adjResult: '0' },
         receivedQty: 100,
     });
+    const candidatesB = await IqcSyncRepository.findIqcPendingAllocations(500, null);
+    check(
+        'B: sweep includes an open WAITING_IQC allocation with all lots',
+        candidatesB.some((row) => row.allocationId === b.allocationId)
+    );
+    const afterB = await IqcSyncRepository.findIqcPendingAllocations(500, {
+        allocatedAt: candidatesB.find((row) => row.allocationId === b.allocationId).allocatedAt,
+        allocationId: b.allocationId,
+    });
+    check('B: keyset sweep excludes the cursor itself', !afterB.some(
+        (row) => row.allocationId === b.allocationId
+    ));
     const resultB = await iqcSyncService.syncAllocation(b.allocationId);
     const receiptsB = await readReceipts(b.allocationId);
     const allocB = await readAllocation(b.allocationId);
@@ -763,6 +776,92 @@ async function runCases() {
         [resultQ, allocQ]
     );
 
+    // ---- U. Quyết định và số lượng mâu thuẫn, hoặc lượng trả ngoài giới hạn ----
+    const invalidCases = [
+        ['PASS with full return', '1', null, 100, 'iqc_decision_quantity_mismatch'],
+        ['EXEMPT with full return', '3', null, 100, 'iqc_decision_quantity_mismatch'],
+        ['negative return', '1', null, -0.00000001, 'iqc_invalid_quantity'],
+        ['return above sheet quantity', '2', '0', 100.00000001, 'iqc_invalid_quantity'],
+    ];
+    for (const [label, adjResult, proResult, returnQty, reason] of invalidCases) {
+        const fixture = await fixtureSingle({
+            notice: { sheetQty: 100, adjResult, proResult, returnQty },
+            receivedQty: 100,
+        });
+        const result = await iqcSyncService.syncAllocation(fixture.allocationId);
+        const allocation = await readAllocation(fixture.allocationId);
+        const [receipt] = await readReceipts(fixture.allocationId);
+        check(
+            `U: ${label} keeps allocation pending with a warning`,
+            result.state === STATES.DATA_ERROR && result.reason === reason &&
+            allocation.status === 'WAITING_IQC' && allocation.hasWarning === true,
+            [result, allocation]
+        );
+        check(
+            `U: ${label} leaves IQC decision and quantities untouched`,
+            receipt.iqcDecision === null && receipt.qtyInStock === null && receipt.qtyReturn === null,
+            receipt
+        );
+    }
+
+    // ---- V. T8 cập nhật kết quả hợp lệ sau khi có cảnh báo ----
+    await db.query(
+        `UPDATE ${TABLES.notice2} SET adj_result = '1', return_qty = 0 WHERE id = ?`,
+        [p.notice.id]
+    );
+    await db.query(
+        `UPDATE ${TABLES.receipt} SET has_warning = TRUE WHERE allocation_id = ?`,
+        [p.allocationId]
+    );
+    const resultV = await iqcSyncService.syncAllocation(p.allocationId);
+    const allocationV = await readAllocation(p.allocationId);
+    const [receiptV] = await readReceipts(p.allocationId);
+    check(
+        'V: successful retry clears allocation and receipt warnings',
+        resultV.state === STATES.MATCHED && allocationV.status === 'WAITING_STOCK' &&
+        allocationV.hasWarning === false && receiptV.hasWarning === false,
+        [resultV, allocationV, receiptV]
+    );
+
+    // ---- W. Cả hai mã xử lý FAIL đều dùng số lượng trả từ T8 ----
+    const failFixtures = [];
+    for (const [proResult, decision] of [['0', 'FAIL_RETURN'], ['2', 'FAIL_ACCEPT']]) {
+        for (const returnQty of [0, 30, 100]) {
+            const fixture = await fixtureSingle({
+                notice: { sheetQty: 100, adjResult: '2', proResult, returnQty },
+                receivedQty: 100,
+            });
+            const result = await iqcSyncService.syncAllocation(fixture.allocationId);
+            const allocation = await readAllocation(fixture.allocationId);
+            const [receipt] = await readReceipts(fixture.allocationId);
+            const fullReturn = returnQty === 100;
+            check(
+                `W: FAIL pro_result=${proResult}, return_qty=${returnQty} records shelf quantities`,
+                result.state === (fullReturn ? STATES.RETURNED : STATES.MATCHED) &&
+                allocation.status === (fullReturn ? 'RETURNED' : 'WAITING_STOCK') &&
+                allocation.warehouseStatus === (fullReturn ? 'RETURN' : 'TEMP_IN') &&
+                allocation.hasWarning === false &&
+                allocation.iqcDecision === decision &&
+                Number(receipt.qtyInStock) === 100 - returnQty &&
+                Number(receipt.qtyReturn) === returnQty,
+                [result, allocation, receipt]
+            );
+            failFixtures.push({ id: fixture.allocationId, returnQty });
+        }
+    }
+
+    const lots = await OverviewService.listLots();
+    for (const { id, returnQty } of failFixtures) {
+        const lot = lots.find((item) => item.id === id);
+        check(
+            'W: lots API payload includes shelf and IQC quantities',
+            lot?.shelfCode === slotCode && Number(lot.qtyReturn) === returnQty &&
+            Number(lot.qtyInStock) === 100 - returnQty &&
+            lot.status === (returnQty === 100 ? 'RETURNED' : 'WAITING_STOCK'),
+            lot
+        );
+    }
+
     // ---- R. Manual IQC endpoint: DB_MODE=sqlserver → blocked ----
     check(
         'R: manual IQC disable khi DB_MODE=sqlserver',
@@ -787,8 +886,8 @@ async function runCases() {
     for (const file of IQC_SOURCE_FILES) {
         const content = fs.readFileSync(file, 'utf8');
         check(
-            `T: ${path.basename(file)} không có INSERT/UPDATE/DELETE t8_*`,
-            !/\b(INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+t8_/i.test(content)
+            `T: ${path.basename(file)} không ghi hoặc đổi schema T8`,
+            !/\b(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM|MERGE(?:\s+INTO)?|(?:CREATE|ALTER|DROP)\s+(?:TABLE|VIEW)|TRUNCATE\s+TABLE)\s+(?:dbo\.)?(?:t8_|pur_|bas_|v_pur_)/i.test(content)
         );
     }
 }

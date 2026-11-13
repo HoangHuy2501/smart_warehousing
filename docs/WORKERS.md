@@ -1,4 +1,4 @@
-# Background Workers — Receipt Sync (BullMQ + Redis)
+# Background Workers — Receipt Sync và IQC Auto Sync (BullMQ + Redis)
 
 Developer note cho worker nền. Task gốc: **Temporary Receipt Sync Worker** —
 tự động kiểm tra T8 `pur_notice2`, lấy `made_lot`, tạo `whs_allocation_receipt`
@@ -161,23 +161,43 @@ Reference thật: `pur_order2.id 341179` → `pur_notice2.id 340417`
 - Sweep cron `*/5 * * * *` tự enqueue lại các allocation pending
   (batch `RECEIPT_SYNC_BATCH_SIZE`, default 200) — không cần can thiệp tay.
 
-## Thêm IQC Worker sau này
+## IQC Auto Sync
 
-Giữ nguyên luồng và chỉ viết phần business:
+`docker compose up -d --build` khởi động `iqc-worker` cùng API, `receipt-worker`
+và Redis. Khi chạy ngoài Compose, dùng `npm run worker:iqc` với cùng cấu hình
+SQL Server, Redis và `REDIS_PREFIX` như API. Xem log bằng
+`docker compose logs -f iqc-worker` hoặc chạy worker trực tiếp trong terminal.
 
-```text
-workers/iqc-sync.worker.js          (entrypoint — ~60 dòng, copy receipt rồi đổi tên/queue/processor)
-services/jobs/iqc-sync.job.js       (orchestration IQC job)
-services/iqc-sync.service.js       (business IQC — viết hoàn toàn mới)
-repositories/iqc-sync.repository.js (SQL IQC — viết mới)
-queues/iqc-sync.queue.js            (enqueue IQC — tham khảo receipt)
-```
+| Biến | Mặc định |
+| --- | --- |
+| `IQC_SWEEP_CRON` | `*/5 * * * *` |
+| `IQC_SYNC_BATCH_SIZE` | `200` |
+| `WORKER_IQC_CONCURRENCY` | `5` |
 
-REUSE TRỰC TIẾP (không copy): `config/worker.config.js` (thêm queue name +
-retry policy riêng nếu cần), `util/worker/redis.js`, `util/worker/queue.js`
-(truyền queueName), `util/worker/create-app-worker.js` (truyền
-queueName + processor), `util/worker/errors.js`,
-`util/worker/graceful-shutdown.js`, `util/worker/logger.js`.
+Worker đăng ký lịch BullMQ cho queue `iqc-sync` và quét các allocation
+`WAITING_IQC` đang mở, có receipt và mọi receipt đều đã có lot. Job điều phối
+việc chạy, retry và ghi log. Service quyết định nghiệp vụ và cập nhật WHS
+trong transaction. Repository đọc T8 qua `pur_notice2.id` và khớp đủ sáu trường
+`sheet_no`, `sheet_id`, `pur_no`, `pur_id`, `goods_no`, `made_lot` trên
+`v_pur_notice_detail`.
 
-Cú pháp chuẩn BullMQ 6: cron dùng `queue.upsertJobScheduler(id, {pattern}, {name, data})`
-— KHÔNG dùng `queue.add(..., {repeat})` (đã bỏ từ BullMQ 6, bỏ qua im lặng).
+- Với FAIL, cả `pro_result = 0` (Rejected) và `2` (Specially procured) đều
+  tính lượng nhận và trả từ `return_qty`. Kết quả IQC vẫn lưu theo mã gốc
+  (`FAIL_RETURN` hoặc `FAIL_ACCEPT`).
+- Khi tất cả receipt hợp lệ, còn lượng được nhận thì chuyển
+  `WAITING_STOCK / TEMP_IN`. Trả hết lượng của allocation thì chuyển
+  `RETURNED / RETURN`. Luồng chạy trước GRN.
+- Giao diện kệ dùng `shelfCode`, `status`, `qtyReturn` và `qtyInStock` từ
+  `GET /api/warehouse/lots` để hiển thị số lượng phải trả và số lượng chờ
+  duyệt theo lô. `qtyInStock` ở trạng thái `WAITING_STOCK` là lượng IQC
+  chấp nhận, chưa phải tồn kho.
+- Khi trả một phần, chỉ ghi số lượng nếu notice thuộc đúng một allocation
+  đang mở và receipt nhận đủ số lượng trên notice.
+- Dữ liệu mâu thuẫn hoặc partial không thể phân bổ giữ `WAITING_IQC` và bật
+  `has_warning`. Lượt quét sau sẽ thử lại và đồng bộ thành công sẽ xóa cảnh báo.
+
+IQC chỉ đọc T8, chỉ cập nhật dữ liệu WHS và không tạo GRN hay đặt `IN_STOCK`.
+Endpoint IQC thủ công trả 403 trong `DB_MODE=sqlserver`.
+
+Chạy bộ kiểm thử với PostgreSQL sandbox đã có fixture schema bằng
+`DB_MODE=test-postgres node test/iqc-sync.test.js`.
