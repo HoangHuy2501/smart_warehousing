@@ -4,14 +4,14 @@
  * Repository IQC Sync — primitive đọc T8 (READ ONLY) + đọc/ghi WHS.
  *
  * Tách khỏi receipt-sync.repository vì vòng đời khác (allocation đã ở
- * WAITING_IQC, receipt đã có lot) — không copy business decision nào:
+ * WAITING_IQC / WAITING_STOCK / RETURNED, receipt đã có lot) — không copy business decision nào:
  * mapping adj_result/pro_result, chia quantity, derive status đều nằm ở
  * services/iqc-sync.service.js.
  *
  * Nhóm primitive:
  *   SWEEP
  *     - findIqcPendingAllocations(limit, cursor) : keyset cursor, chỉ
- *       allocation còn mở + status WAITING_IQC + có receipt AND TẤT CẢ
+ *       allocation còn mở + status IQC còn theo dõi + có receipt AND TẤT CẢ
  *       receipt của allocation đã có lot (NOT EXISTS receipt chưa lot):
  *       allocation có receipt chưa lot sẽ KHÔNG được enqueue — tránh spam
  *       IQC sync rồi trả waiting_lot.
@@ -138,7 +138,7 @@ function buildRawUpdate(table, patch, whereCol, whereValue) {
 
 class IqcSyncRepository {
     /**
-     * Sweep candidate — allocation còn mở, đang WAITING_IQC và đã có ít nhất
+     * Sweep candidate — allocation còn mở, còn theo dõi IQC và đã có ít nhất
      * 1 receipt mang lot thật (lot_no non-empty). Allocation chưa có lot
      * KHÔNG được enqueue IQC (spec case A). EXISTS giữ đúng 1 dòng/allocation
      * dù notice bị chia nhiều receipt.
@@ -162,7 +162,8 @@ class IqcSyncRepository {
       a.allocated_at AS [allocatedAt]
     FROM whs_slot_allocation a
     WHERE a.closed_at IS NULL
-      AND a.status = 'WAITING_IQC'
+      AND a.status IN ('WAITING_IQC', 'WAITING_STOCK', 'RETURNED')
+      AND COALESCE(a.warehouse_status, '') <> 'IN'
       AND EXISTS (
         SELECT 1
         FROM whs_allocation_receipt r
@@ -193,12 +194,16 @@ class IqcSyncRepository {
      * chừng).
      * @param {string} allocationId PK whs_slot_allocation
      * @param {Function} [query] executor (mặc định db.query; tx truyền txQuery)
+     * @param {boolean} [lock] giữ khóa dòng đến hết transaction khi ghi IQC
      * @returns {Promise<{
      *   allocationId: string, status: string, warehouseStatus: string,
-     *   iqcDecision: string | null, hasWarning: boolean, closedAt: unknown
+     *   iqcDecision: string | null, hasWarning: boolean, closedAt: unknown,
+     *   qtyInStock: number | null, qtyReturn: number | null, lastIqcAt: unknown
      * } | null>}
      */
-    async findAllocationForIqc(allocationId, query = db.query) {
+    async findAllocationForIqc(allocationId, query = db.query, lock = false) {
+        const lockHint = lock && !isPg() ? ' WITH (UPDLOCK)' : '';
+        const lockClause = lock && isPg() ? ' FOR UPDATE' : '';
         const sql = `
     -- DECLARE @allocationId VARCHAR(40) = 'al_abc123';
     SELECT
@@ -207,9 +212,12 @@ class IqcSyncRepository {
       a.warehouse_status AS [warehouseStatus],
       a.iqc_decision AS [iqcDecision],
       a.has_warning AS [hasWarning],
+      CAST(a.qty_in_stock AS FLOAT) AS [qtyInStock],
+      CAST(a.qty_return AS FLOAT) AS [qtyReturn],
+      a.last_iqc_at AS [lastIqcAt],
       a.closed_at AS [closedAt]
-    FROM whs_slot_allocation a
-    WHERE a.id = ?;
+    FROM whs_slot_allocation a${lockHint}
+    WHERE a.id = ?${lockClause};
   `;
         const params = [allocationId];
         guardParams(params);

@@ -704,15 +704,15 @@ async function runCases() {
     const resultN = await iqcSyncService.syncAllocation('iqct-al-missing');
     check('N: allocation missing → NO_OP', resultN.state === STATES.NO_OP, resultN);
 
-    // ---- O. Allocation đã WAITING_STOCK → old job NO_OP ----
+    // ---- O. Allocation đã vào tồn kho → old job NO_OP ----
     const noticeO = await createNotice({
         sheetQty: 30,
         adjResult: '1',
         qcDate: '2026-11-10T17:00:00+07:00',
     });
     const allocO = await createAllocation({
-        status: 'WAITING_STOCK',
-        warehouseStatus: 'TEMP_IN',
+        status: 'IN_STOCK',
+        warehouseStatus: 'IN',
         allocatedQty: 30,
     });
     await addReceipt({
@@ -721,12 +721,14 @@ async function runCases() {
         receivedQty: 30,
         lotNo: noticeO.madeLot,
     });
+    const sweepO = await IqcSyncRepository.findIqcPendingAllocations(200);
+    check('O: sweep excludes IN_STOCK', !sweepO.some((row) => row.allocationId === allocO), sweepO);
     const resultO = await iqcSyncService.syncAllocation(allocO);
     const allocOAfter = await readAllocation(allocO);
     check(
         'O: status đã tiến → NO_OP, không rollback',
         resultO.state === STATES.NO_OP &&
-        allocOAfter.status === 'WAITING_STOCK',
+        resultO.reason === 'status_advanced' && allocOAfter.status === 'IN_STOCK',
         [resultO, allocOAfter]
     );
 
@@ -770,11 +772,42 @@ async function runCases() {
         { beforeQ, afterQ }
     );
     check(
-        'Q: trạng thái cuối không đổi (status đã tiến → lần 2 NO_OP)',
-        resultQ.state === STATES.NO_OP &&
+        'Q: same result is a NO_OP after rechecking T8',
+        resultQ.state === STATES.NO_OP && resultQ.reason === 'iqc_unchanged' &&
         allocQ.status === 'WAITING_STOCK',
         [resultQ, allocQ]
     );
+
+    // ---- R. Recheck completed and returned lots until they enter stock ----
+    const recheck = await fixtureSingle({ notice: { sheetQty: 100, adjResult: '1' } });
+    await iqcSyncService.syncAllocation(recheck.allocationId);
+    const corrections = [
+        { adj: '2', pro: '2', returned: 30, status: 'WAITING_STOCK', received: 70 },
+        { adj: '2', pro: '0', returned: 100, status: 'RETURNED', received: 0 },
+        { adj: '3', pro: '0', returned: 0, status: 'WAITING_STOCK', received: 100 },
+        { adj: '0', pro: '0', returned: 0, status: 'WAITING_IQC', received: 0 },
+    ];
+    for (const correction of corrections) {
+        const candidates = await IqcSyncRepository.findIqcPendingAllocations(200);
+        check('R: sweep includes the open lot before its correction',
+            candidates.some((row) => row.allocationId === recheck.allocationId), correction);
+        await db.query(
+            `UPDATE ${TABLES.notice2} SET adj_result = ?, pro_result = ?, return_qty = ? WHERE id = ?`,
+            [correction.adj, correction.pro, correction.returned, recheck.notice.id]
+        );
+        const result = await iqcSyncService.syncAllocation(recheck.allocationId);
+        const allocation = await readAllocation(recheck.allocationId);
+        const [receipt] = await readReceipts(recheck.allocationId);
+        const waiting = correction.status === 'WAITING_IQC';
+        check(`R: correction changes the lot to ${correction.status} with absolute quantities`,
+            allocation.status === correction.status &&
+            allocation.qtyInStock === correction.received &&
+            allocation.qtyReturn === correction.returned &&
+            receipt.qtyInStock === (waiting ? null : correction.received) &&
+            receipt.qtyReturn === (waiting ? null : correction.returned) &&
+            (!waiting || result.state === STATES.WAITING_IQC),
+            { result, allocation, receipt });
+    }
 
     // ---- U. Quyết định và số lượng mâu thuẫn, hoặc lượng trả ngoài giới hạn ----
     const invalidCases = [

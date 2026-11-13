@@ -1797,23 +1797,23 @@ function makeMemoryRepository() {
     },
 
     // ================================================================
-    // IQC SYNC (allocation WAITING_IQC + receipt đã có lot) — mirror
+    // IQC SYNC (allocation còn theo dõi IQC + receipt đã có lot) — mirror
     // repository/sql/iqc-sync.repository.js (dùng bởi IQC Worker trong
     // DB_MODE=memory)
     // ================================================================
     iqcSync: {
       /**
-       * Mirror findIqcPendingAllocations: còn mở + WAITING_IQC + có
+       * Mirror findIqcPendingAllocations: còn mở + trạng thái còn theo dõi IQC + có
        * receipt mang lot non-empty. Cùng cursor keyset như Receipt Sync.
        */
       async findIqcPendingAllocations(limit, cursor) {
         const pending = data.allocations.filter((a) => {
           if (a.closed_at !== null) return false;
-          if (a.status !== 'WAITING_IQC') return false;
+          if (a.warehouse_status === 'IN' ||
+              !['WAITING_IQC', 'WAITING_STOCK', 'RETURNED'].includes(a.status)) return false;
           if (!keysetAfter(a, cursor)) return false;
-          return data.receipts.some(
-            (r) => r.allocation_id === a.id && hasLotValue(r.lot_no)
-          );
+          const receipts = data.receipts.filter((r) => r.allocation_id === a.id);
+          return receipts.length > 0 && receipts.every((r) => hasLotValue(r.lot_no));
         });
         pending.sort(
           (a, b) =>
@@ -1837,6 +1837,9 @@ function makeMemoryRepository() {
           warehouseStatus: row.warehouse_status,
           iqcDecision: row.iqc_decision ?? null,
           hasWarning: Boolean(row.has_warning),
+          qtyInStock: numOrNull(row.qty_in_stock),
+          qtyReturn: numOrNull(row.qty_return),
+          lastIqcAt: isoOrNull(row.last_iqc_at),
           closedAt: row.closed_at ?? null,
         };
       },

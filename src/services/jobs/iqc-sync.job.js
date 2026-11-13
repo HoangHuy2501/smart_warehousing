@@ -15,7 +15,7 @@
  *        add job mới — add cùng dedup id khi job còn active sẽ bị BullMQ
  *        discard). Lịch tiệm tiến dùng businessRetryDelayMs của
  *        worker.config (30s → 1m → 5m → 15m → 30m); hết lịch thì dừng
- *        hẳn — sweep cron đón allocation vẫn WAITING_IQC. Business waiting
+ *        hẳn — sweep cron đón allocation còn cần theo dõi IQC. Business waiting
  *        KHÔNG ăn technical attempts.
  *      - PARTIAL_AMBIGUOUS / DATA_ERROR → trả result, KHÔNG throw, KHÔNG
  *        retry (cần người vận hành xem log / dữ liệu T8).
@@ -29,7 +29,7 @@
  * technical attempts.
  *
  * Job 'sweep' (cron, upsertJobScheduler ở worker entrypoint):
- *   query candidate set-based (chỉ allocation còn mở + WAITING_IQC +
+ *   query candidate set-based (chỉ allocation còn mở, còn theo dõi IQC +
  *   receipt có lot) với CURSOR KEYSET chống starvation, rồi enqueue
  *   (dedup native — 1 job in-flight/allocation).
  */
@@ -147,7 +147,7 @@ function advanceCursor(rows) {
 }
 
 /**
- * Processor job 'sweep' — enqueue allocation WAITING_IQC đã có lot.
+ * Processor job 'sweep' — enqueue allocation còn theo dõi IQC đã có lot.
  * @param {import('bullmq').Job} job
  * @returns {Promise<object>}
  */
