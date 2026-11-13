@@ -23,13 +23,13 @@
  *   fallback goods_no + lot hay pur_no + goods_no.
  * - Quantity KHÔNG double-count: một notice có thể chia nhiều allocation.
  *   KHÔNG phụ thuộc GRN in_qty — IQC chạy TRƯỚC GRN, in_qty chỉ phản ánh
- *   đơn nhập kho đã ghi (được SELECT nhưng KHÔNG dùng để classify):
- *     full accept (return_qty ≈ 0)
+ *   đơn nhập kho đã ghi:
+ *     full accept (return_qty = 0)
  *       → mỗi receipt: qty_in_stock = received_qty, qty_return = 0
- full return (return_qty ≈ sheet_qty)
+ *     full return (return_qty = sheet_qty)
  *       → mỗi receipt: qty_in_stock = 0, qty_return = received_qty
  *     partial: CHỈ nhận số tuyệt đối khi notice thuộc đúng 1 allocation
- *       và receipt.received_qty ≈ sheet_qty → qty_in_stock =
+ *       và receipt.received_qty = sheet_qty → qty_in_stock =
  *       sheet_qty - return_qty, qty_return = return_qty.
  *       Partial + multi-allocation → KHÔNG chia tỷ lệ/FIFO/LIFO → giữ
  *       WAITING_IQC + has_warning (state PARTIAL_AMBIGUOUS).
@@ -111,19 +111,6 @@ const QUANTITY_SHAPE = {
     PARTIAL: 'PARTIAL',
 };
 
-/** Epsilon so sánh quantity (NUMERIC(18,8)) — quy ước 1e-4 cho cả file. */
-const QTY_EPS = 1e-4;
-
-/**
- * So sánh 2 số lượng với epsilon.
- * @param {unknown} a
- * @param {unknown} b
- * @returns {boolean}
- */
-function nearlyEqual(a, b) {
-    return Math.abs(Number(a || 0) - Number(b || 0)) <= QTY_EPS;
-}
-
 /** Chuẩn hóa mã T8 về string trim (DB thật trả CHAR, fixture có thể number). */
 function normalizeCode(value) {
     return value === null || value === undefined ? '' : String(value).trim();
@@ -192,24 +179,18 @@ function mapIqcDecision(iqcRow) {
 }
 
 /**
- * Phân loại hình thái số lượng của notice T8 — CHỈ theo return_qty so với
- * sheet_qty. KHÔNG dùng in_qty để classify: IQC chạy TRƯỚC GRN nên PASS/
- * EXEMPT/FAIL_ACCEPT hợp lệ ngay cả khi in_qty = 0 (GRN chưa nhập);
- * in_qty chỉ phản ánh GRN đã ghi, được SELECT nhưng không tham gia quyết
- * định. Partial = không rơi vào full accept hay full return → cần kiểm
- * tra multi-allocation trước khi ghi.
- * @param {{ sheetQty: unknown, returnQty: unknown }} iqcRow
- * @returns {string} QUANTITY_SHAPE
+ * Phân loại số lượng IQC trước GRN. NULL return_qty được xem là chưa có
+ * số lượng trả. Dữ liệu ngoài giới hạn trả null để caller bật cảnh báo.
  */
 function classifyQuantity(iqcRow) {
-    const sheetQty = Number(iqcRow.sheetQty || 0);
-    const returnQty = Number(iqcRow.returnQty || 0);
-    if (nearlyEqual(returnQty, 0)) {
-        return QUANTITY_SHAPE.FULL_ACCEPT;
+    const sheetQty = Number(iqcRow.sheetQty);
+    const returnQty = Number(iqcRow.returnQty ?? 0);
+    if (!Number.isFinite(sheetQty) || sheetQty <= 0 ||
+        !Number.isFinite(returnQty) || returnQty < 0 || returnQty > sheetQty) {
+        return null;
     }
-    if (nearlyEqual(returnQty, sheetQty)) {
-        return QUANTITY_SHAPE.FULL_RETURN;
-    }
+    if (returnQty === 0) return QUANTITY_SHAPE.FULL_ACCEPT;
+    if (returnQty === sheetQty) return QUANTITY_SHAPE.FULL_RETURN;
     return QUANTITY_SHAPE.PARTIAL;
 }
 
@@ -220,7 +201,7 @@ function classifyQuantity(iqcRow) {
  * sheet_qty - return_qty, qty_return = return_qty (KHÔNG dùng in_qty —
  * giá trị đó phụ thuộc GRN, IQC chạy trước GRN).
  * @param {{ receivedQty: unknown }} receipt
-* @param {{ sheetQty: unknown, returnQty: unknown, qcDate: unknown }} iqcRow
+ * @param {{ sheetQty: unknown, returnQty: unknown, qcDate: unknown }} iqcRow
  * @param {{ decision: string, shape: string }} entry
  * @param {Date} updatedAt
  * @returns {Record<string, unknown>}
@@ -294,13 +275,13 @@ function aggregateAllocationIqc(receipts) {
  */
 function deriveAllocationStatus(summary) {
     if (summary.allTerminal) {
-        if (summary.qtyInStock > QTY_EPS) {
+        if (summary.qtyInStock > 0) {
             return {
                 status: ALLOCATION_STATUS.WAITING_STOCK,
                 warehouseStatus: WAREHOUSE_STATUS.TEMP_IN,
             };
         }
-        if (summary.qtyReturn > QTY_EPS) {
+        if (summary.qtyReturn > 0) {
             return {
                 status: ALLOCATION_STATUS.RETURNED,
                 warehouseStatus: WAREHOUSE_STATUS.RETURN,
@@ -348,7 +329,7 @@ function buildActiveAllocationCounts(rows) {
  * tính lại FRESH trong transaction).
  * @param {Array<Record<string, unknown>>} receipts
  * @returns {Promise<{ state?: string, reason?: string,
- *   plan?: Map<string, { iqcRow: object, decision: string, shape: string }> }>}
+ *   hasWarning?: boolean, plan?: Map<string, object> }>}
  */
 async function buildReceiptPlan(receipts) {
     const noticeIds = [...new Set(receipts.map((r) => Number(r.noticeDetailId)))];
@@ -370,10 +351,6 @@ async function buildReceiptPlan(receipts) {
         const key = buildIdentityKey(row);
         rowsByKey.set(key, [...(rowsByKey.get(key) || []), row]);
     }
-    const activeCounts = buildActiveAllocationCounts(
-        await IqcSyncRepository.countActiveAllocationsByNoticeIds(noticeIds)
-    );
-
     const plan = new Map();
     for (const receipt of receipts) {
         const notice = noticeById.get(Number(receipt.noticeDetailId));
@@ -406,28 +383,29 @@ async function buildReceiptPlan(receipts) {
         }
 
         const shape = classifyQuantity(iqcRow);
-        if (shape === QUANTITY_SHAPE.PARTIAL) {
-            const activeAllocations =
-                activeCounts.get(Number(receipt.noticeDetailId)) || 1;
-            const attributable =
-                activeAllocations <= 1 && nearlyEqual(receipt.receivedQty, iqcRow.sheetQty);
-            if (!attributable) {
-                logger.warn('iqc_partial_ambiguous', {
-                    allocationId: receipt.allocationId,
-                    noticeDetailId: Number(receipt.noticeDetailId),
-                    activeAllocations,
-                    receivedQty: receipt.receivedQty,
-                    sheetQty: iqcRow.sheetQty,
-                    returnQty: iqcRow.returnQty,
-                });
-                return {
-                    state: IQC_SYNC_STATES.PARTIAL_AMBIGUOUS,
-                    reason: 'iqc_partial_ambiguous',
-                };
-            }
+        const isReturnDecision = decision === IQC_DECISIONS.FAIL_RETURN;
+        const inconsistent =
+            (isReturnDecision && shape === QUANTITY_SHAPE.FULL_ACCEPT) ||
+            (!isReturnDecision && shape === QUANTITY_SHAPE.FULL_RETURN);
+        if (!shape || inconsistent) {
+            const reason = shape ? 'iqc_decision_quantity_mismatch' : 'iqc_invalid_quantity';
+            logger.warn(reason, {
+                allocationId: receipt.allocationId,
+                noticeDetailId: Number(receipt.noticeDetailId),
+                decision,
+                sheetQty: iqcRow.sheetQty,
+                returnQty: iqcRow.returnQty,
+            });
+            return { state: IQC_SYNC_STATES.DATA_ERROR, reason, hasWarning: true };
         }
 
-        plan.set(String(receipt.id), { iqcRow, decision, shape });
+        plan.set(String(receipt.id), {
+            iqcRow,
+            decision,
+            shape,
+            noticeDetailId: Number(receipt.noticeDetailId),
+            lotNo: receipt.lotNo,
+        });
     }
     return { plan };
 }
@@ -464,7 +442,7 @@ class IqcSyncServices {
 
         const planResult = await buildReceiptPlan(receipts);
         if (!planResult.plan) {
-            if (planResult.state === IQC_SYNC_STATES.PARTIAL_AMBIGUOUS) {
+            if (planResult.hasWarning || planResult.state === IQC_SYNC_STATES.PARTIAL_AMBIGUOUS) {
                 // Chỉ bật cờ cảnh báo — KHÔNG ghi quantity, KHÔNG đổi status.
                 await this.markAllocationWarning(allocationId);
             }
@@ -505,13 +483,47 @@ class IqcSyncServices {
             );
             const unchanged =
                 fresh.length === plan.size &&
-                fresh.every((receipt) => plan.has(String(receipt.id)));
+                fresh.every((receipt) => {
+                    const entry = plan.get(String(receipt.id));
+                    return entry &&
+                        entry.noticeDetailId === Number(receipt.noticeDetailId) &&
+                        entry.lotNo === receipt.lotNo;
+                });
             if (!unchanged) {
                 return {
                     state: IQC_SYNC_STATES.NO_OP,
                     allocationId,
                     reason: 'receipt_changed',
                 };
+            }
+
+            const partialReceipts = fresh.filter(
+                (receipt) => plan.get(String(receipt.id)).shape === QUANTITY_SHAPE.PARTIAL
+            );
+            if (partialReceipts.length > 0) {
+                const noticeIds = [...new Set(
+                    partialReceipts.map((receipt) => Number(receipt.noticeDetailId))
+                )].sort((a, b) => a - b);
+                // Receipt Sync uses the same allocation → notice lock order.
+                for (const noticeId of noticeIds) {
+                    await ReceiptSyncRepository.acquireNoticeLock(noticeId, tx);
+                }
+                const activeCounts = buildActiveAllocationCounts(
+                    await IqcSyncRepository.countActiveAllocationsByNoticeIds(noticeIds, tx)
+                );
+                const ambiguous = partialReceipts.find((receipt) => {
+                    const { iqcRow } = plan.get(String(receipt.id));
+                    return activeCounts.get(Number(receipt.noticeDetailId)) !== 1 ||
+                        Number(receipt.receivedQty) !== Number(iqcRow.sheetQty);
+                });
+                if (ambiguous) {
+                    const reason = 'iqc_partial_ambiguous';
+                    logger.warn(reason, { allocationId, noticeDetailId: ambiguous.noticeDetailId });
+                    await IqcSyncRepository.updateAllocationIqcSummary(
+                        allocationId, { has_warning: true }, tx
+                    );
+                    return { state: IQC_SYNC_STATES.PARTIAL_AMBIGUOUS, allocationId, reason };
+                }
             }
 
             const updatedAt = new Date();
@@ -539,6 +551,7 @@ class IqcSyncServices {
                     qty_in_stock: summary.qtyInStock,
                     qty_return: summary.qtyReturn,
                     last_iqc_at: summary.lastIqcAt,
+                    has_warning: false,
                 },
                 tx
             );
@@ -589,4 +602,3 @@ module.exports.ALLOCATION_STATUS = ALLOCATION_STATUS;
 module.exports.mapIqcDecision = mapIqcDecision;
 module.exports.classifyQuantity = classifyQuantity;
 module.exports.deriveAllocationStatus = deriveAllocationStatus;
-module.exports.QTY_EPS = QTY_EPS;

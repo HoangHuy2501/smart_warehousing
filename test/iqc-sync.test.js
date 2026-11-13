@@ -1,5 +1,5 @@
 /**
- * IQC SYNC TARGETED TEST (cases A–T) — CHỈ chạy với DB_MODE=test-postgres.
+ * IQC SYNC TARGETED TEST (cases A–V) — CHỈ chạy với DB_MODE=test-postgres.
  *
  * Quy tắc vàng: IQC chạy TRƯỚC GRN — KHÔNG test nào được tạo
  * pur_in1 / pur_in2 (GRN) để làm in_qty = sheet_qty. Các case
@@ -308,6 +308,18 @@ async function runCases() {
         notice: { sheetQty: 100, adjResult: '0' },
         receivedQty: 100,
     });
+    const candidatesB = await IqcSyncRepository.findIqcPendingAllocations(500, null);
+    check(
+        'B: sweep includes an open WAITING_IQC allocation with all lots',
+        candidatesB.some((row) => row.allocationId === b.allocationId)
+    );
+    const afterB = await IqcSyncRepository.findIqcPendingAllocations(500, {
+        allocatedAt: candidatesB.find((row) => row.allocationId === b.allocationId).allocatedAt,
+        allocationId: b.allocationId,
+    });
+    check('B: keyset sweep excludes the cursor itself', !afterB.some(
+        (row) => row.allocationId === b.allocationId
+    ));
     const resultB = await iqcSyncService.syncAllocation(b.allocationId);
     const receiptsB = await readReceipts(b.allocationId);
     const allocB = await readAllocation(b.allocationId);
@@ -763,6 +775,55 @@ async function runCases() {
         [resultQ, allocQ]
     );
 
+    // ---- U. Quyết định và số lượng mâu thuẫn, hoặc lượng trả ngoài giới hạn ----
+    const invalidCases = [
+        ['FAIL_RETURN with zero return', '2', '0', 0, 'iqc_decision_quantity_mismatch'],
+        ['FAIL_ACCEPT with full return', '2', '2', 100, 'iqc_decision_quantity_mismatch'],
+        ['PASS with full return', '1', null, 100, 'iqc_decision_quantity_mismatch'],
+        ['EXEMPT with full return', '3', null, 100, 'iqc_decision_quantity_mismatch'],
+        ['negative return', '1', null, -0.00000001, 'iqc_invalid_quantity'],
+        ['return above sheet quantity', '2', '0', 100.00000001, 'iqc_invalid_quantity'],
+    ];
+    for (const [label, adjResult, proResult, returnQty, reason] of invalidCases) {
+        const fixture = await fixtureSingle({
+            notice: { sheetQty: 100, adjResult, proResult, returnQty },
+            receivedQty: 100,
+        });
+        const result = await iqcSyncService.syncAllocation(fixture.allocationId);
+        const allocation = await readAllocation(fixture.allocationId);
+        const [receipt] = await readReceipts(fixture.allocationId);
+        check(
+            `U: ${label} keeps allocation pending with a warning`,
+            result.state === STATES.DATA_ERROR && result.reason === reason &&
+            allocation.status === 'WAITING_IQC' && allocation.hasWarning === true,
+            [result, allocation]
+        );
+        check(
+            `U: ${label} leaves IQC decision and quantities untouched`,
+            receipt.iqcDecision === null && receipt.qtyInStock === null && receipt.qtyReturn === null,
+            receipt
+        );
+    }
+
+    // ---- V. T8 cập nhật kết quả hợp lệ sau khi có cảnh báo ----
+    await db.query(
+        `UPDATE ${TABLES.notice2} SET adj_result = '1', return_qty = 0 WHERE id = ?`,
+        [p.notice.id]
+    );
+    await db.query(
+        `UPDATE ${TABLES.receipt} SET has_warning = TRUE WHERE allocation_id = ?`,
+        [p.allocationId]
+    );
+    const resultV = await iqcSyncService.syncAllocation(p.allocationId);
+    const allocationV = await readAllocation(p.allocationId);
+    const [receiptV] = await readReceipts(p.allocationId);
+    check(
+        'V: successful retry clears allocation and receipt warnings',
+        resultV.state === STATES.MATCHED && allocationV.status === 'WAITING_STOCK' &&
+        allocationV.hasWarning === false && receiptV.hasWarning === false,
+        [resultV, allocationV, receiptV]
+    );
+
     // ---- R. Manual IQC endpoint: DB_MODE=sqlserver → blocked ----
     check(
         'R: manual IQC disable khi DB_MODE=sqlserver',
@@ -787,8 +848,8 @@ async function runCases() {
     for (const file of IQC_SOURCE_FILES) {
         const content = fs.readFileSync(file, 'utf8');
         check(
-            `T: ${path.basename(file)} không có INSERT/UPDATE/DELETE t8_*`,
-            !/\b(INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+t8_/i.test(content)
+            `T: ${path.basename(file)} không ghi hoặc đổi schema T8`,
+            !/\b(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM|MERGE(?:\s+INTO)?|(?:CREATE|ALTER|DROP)\s+(?:TABLE|VIEW)|TRUNCATE\s+TABLE)\s+(?:dbo\.)?(?:t8_|pur_|bas_|v_pur_)/i.test(content)
         );
     }
 }
