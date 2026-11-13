@@ -181,10 +181,16 @@ trong transaction. Repository đọc T8 qua `pur_notice2.id` và khớp đủ s�
 `sheet_no`, `sheet_id`, `pur_no`, `pur_id`, `goods_no`, `made_lot` trên
 `v_pur_notice_detail`.
 
-- PASS, EXEMPT và FAIL_ACCEPT chuyển sang `WAITING_STOCK / TEMP_IN` khi
-  tất cả receipt có kết quả hợp lệ và còn lượng được nhận. Luồng chạy trước GRN.
-- FAIL_RETURN toàn phần chuyển sang `RETURNED / RETURN` khi toàn bộ lượng
-  của allocation phải trả.
+- Với FAIL, cả `pro_result = 0` (Rejected) và `2` (Specially procured) đều
+  tính lượng nhận và trả từ `return_qty`. Kết quả IQC vẫn lưu theo mã gốc
+  (`FAIL_RETURN` hoặc `FAIL_ACCEPT`).
+- Khi tất cả receipt hợp lệ, còn lượng được nhận thì chuyển
+  `WAITING_STOCK / TEMP_IN`. Trả hết lượng của allocation thì chuyển
+  `RETURNED / RETURN`. Luồng chạy trước GRN.
+- Giao diện kệ dùng `shelfCode`, `status`, `qtyReturn` và `qtyInStock` từ
+  `GET /api/warehouse/lots` để hiển thị số lượng phải trả và số lượng chờ
+  duyệt theo lô. `qtyInStock` ở trạng thái `WAITING_STOCK` là lượng IQC
+  chấp nhận, chưa phải tồn kho.
 - Khi trả một phần, chỉ ghi số lượng nếu notice thuộc đúng một allocation
   đang mở và receipt nhận đủ số lượng trên notice.
 - Dữ liệu mâu thuẫn hoặc partial không thể phân bổ giữ `WAITING_IQC` và bật

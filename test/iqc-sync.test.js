@@ -1,5 +1,5 @@
 /**
- * IQC SYNC TARGETED TEST (cases A–V) — CHỈ chạy với DB_MODE=test-postgres.
+ * IQC SYNC TARGETED TEST (cases A–W) — CHỈ chạy với DB_MODE=test-postgres.
  *
  * Quy tắc vàng: IQC chạy TRƯỚC GRN — KHÔNG test nào được tạo
  * pur_in1 / pur_in2 (GRN) để làm in_qty = sheet_qty. Các case
@@ -30,6 +30,7 @@ const db = require('../src/config/db');
 const { TABLES } = require('../src/repository/sql/tables');
 const IqcSyncRepository = require('../src/repository/sql/iqc-sync.repository');
 const iqcSyncService = require('../src/services/iqc-sync.service');
+const OverviewService = require('../src/services/overview.service');
 const { manualIqcDisabled } = require('../src/services/lot.service');
 
 const STATES = iqcSyncService.IQC_SYNC_STATES;
@@ -777,8 +778,6 @@ async function runCases() {
 
     // ---- U. Quyết định và số lượng mâu thuẫn, hoặc lượng trả ngoài giới hạn ----
     const invalidCases = [
-        ['FAIL_RETURN with zero return', '2', '0', 0, 'iqc_decision_quantity_mismatch'],
-        ['FAIL_ACCEPT with full return', '2', '2', 100, 'iqc_decision_quantity_mismatch'],
         ['PASS with full return', '1', null, 100, 'iqc_decision_quantity_mismatch'],
         ['EXEMPT with full return', '3', null, 100, 'iqc_decision_quantity_mismatch'],
         ['negative return', '1', null, -0.00000001, 'iqc_invalid_quantity'],
@@ -823,6 +822,45 @@ async function runCases() {
         allocationV.hasWarning === false && receiptV.hasWarning === false,
         [resultV, allocationV, receiptV]
     );
+
+    // ---- W. Cả hai mã xử lý FAIL đều dùng số lượng trả từ T8 ----
+    const failFixtures = [];
+    for (const [proResult, decision] of [['0', 'FAIL_RETURN'], ['2', 'FAIL_ACCEPT']]) {
+        for (const returnQty of [0, 30, 100]) {
+            const fixture = await fixtureSingle({
+                notice: { sheetQty: 100, adjResult: '2', proResult, returnQty },
+                receivedQty: 100,
+            });
+            const result = await iqcSyncService.syncAllocation(fixture.allocationId);
+            const allocation = await readAllocation(fixture.allocationId);
+            const [receipt] = await readReceipts(fixture.allocationId);
+            const fullReturn = returnQty === 100;
+            check(
+                `W: FAIL pro_result=${proResult}, return_qty=${returnQty} records shelf quantities`,
+                result.state === (fullReturn ? STATES.RETURNED : STATES.MATCHED) &&
+                allocation.status === (fullReturn ? 'RETURNED' : 'WAITING_STOCK') &&
+                allocation.warehouseStatus === (fullReturn ? 'RETURN' : 'TEMP_IN') &&
+                allocation.hasWarning === false &&
+                allocation.iqcDecision === decision &&
+                Number(receipt.qtyInStock) === 100 - returnQty &&
+                Number(receipt.qtyReturn) === returnQty,
+                [result, allocation, receipt]
+            );
+            failFixtures.push({ id: fixture.allocationId, returnQty });
+        }
+    }
+
+    const lots = await OverviewService.listLots();
+    for (const { id, returnQty } of failFixtures) {
+        const lot = lots.find((item) => item.id === id);
+        check(
+            'W: lots API payload includes shelf and IQC quantities',
+            lot?.shelfCode === slotCode && Number(lot.qtyReturn) === returnQty &&
+            Number(lot.qtyInStock) === 100 - returnQty &&
+            lot.status === (returnQty === 100 ? 'RETURNED' : 'WAITING_STOCK'),
+            lot
+        );
+    }
 
     // ---- R. Manual IQC endpoint: DB_MODE=sqlserver → blocked ----
     check(

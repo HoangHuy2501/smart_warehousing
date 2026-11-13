@@ -21,6 +21,7 @@
  *   sheet_id, pur_no, pur_id, goods_no, made_lot) → query view theo ĐỦ 6
  *   khóa. 0 dòng → WAITING_IQC; >1 dòng → warning, KHÔNG TOP 1, KHÔNG
  *   fallback goods_no + lot hay pur_no + goods_no.
+ * - Với FAIL, cả pro_result 0 và 2 đều tính nhận/trả theo return_qty.
  * - Quantity KHÔNG double-count: một notice có thể chia nhiều allocation.
  *   KHÔNG phụ thuộc GRN in_qty — IQC chạy TRƯỚC GRN, in_qty chỉ phản ánh
  *   đơn nhập kho đã ghi:
@@ -101,7 +102,7 @@ const ADJ_RESULT = {
 };
 const PRO_RESULT = {
     RETURN: '0',
-    ACCEPT: '2',
+    SPECIALLY_PROCURED: '2',
 };
 
 /** Hình thái số lượng của 1 notice. */
@@ -169,7 +170,7 @@ function mapIqcDecision(iqcRow) {
     if (adj === ADJ_RESULT.WAITING) return IQC_DECISIONS.WAITING;
     if (adj === ADJ_RESULT.PASS) return IQC_DECISIONS.PASS;
     if (adj === ADJ_RESULT.EXEMPT) return IQC_DECISIONS.EXEMPT;
-    if (adj === ADJ_RESULT.FAIL && pro === PRO_RESULT.ACCEPT) {
+    if (adj === ADJ_RESULT.FAIL && pro === PRO_RESULT.SPECIALLY_PROCURED) {
         return IQC_DECISIONS.FAIL_ACCEPT;
     }
     if (adj === ADJ_RESULT.FAIL && pro === PRO_RESULT.RETURN) {
@@ -383,10 +384,8 @@ async function buildReceiptPlan(receipts) {
         }
 
         const shape = classifyQuantity(iqcRow);
-        const isReturnDecision = decision === IQC_DECISIONS.FAIL_RETURN;
-        const inconsistent =
-            (isReturnDecision && shape === QUANTITY_SHAPE.FULL_ACCEPT) ||
-            (!isReturnDecision && shape === QUANTITY_SHAPE.FULL_RETURN);
+        const inconsistent = shape === QUANTITY_SHAPE.FULL_RETURN &&
+            (decision === IQC_DECISIONS.PASS || decision === IQC_DECISIONS.EXEMPT);
         if (!shape || inconsistent) {
             const reason = shape ? 'iqc_decision_quantity_mismatch' : 'iqc_invalid_quantity';
             logger.warn(reason, {
