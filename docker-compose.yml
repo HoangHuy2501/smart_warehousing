@@ -1,0 +1,63 @@
+services:
+  app:
+    build: .
+    init: true
+    env_file: .env
+    environment:
+      NODE_ENV: development
+      DB_MODE: sqlserver
+      PORT: "3000"
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      REDIS_TLS: "false"
+    ports:
+      - "${APP_PORT:-3000}:3000"
+    volumes:
+      - .:/app
+      - /app/node_modules
+    command: ./node_modules/.bin/nodemon -L --signal SIGTERM --watch src --watch docs --ext js,json --delay 1 src/server.js
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+  receipt-worker:
+    build: .
+    init: true
+    env_file: .env
+    environment:
+      NODE_ENV: development
+      DB_MODE: sqlserver
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      REDIS_TLS: "false"
+    volumes:
+      - .:/app
+      - /app/node_modules
+    command: ./node_modules/.bin/nodemon -L --signal SIGTERM --watch src --ext js,json --delay 1 src/worker/receipt-sync.worker.js
+    depends_on:
+      - redis
+    restart: unless-stopped
+    stop_grace_period: 40s
+
+  ngrok:
+    image: ngrok/ngrok:latest
+    environment:
+      NGROK_AUTHTOKEN: ${NGROK_AUTHTOKEN:?Set NGROK_AUTHTOKEN in .env}
+    command: http app:3000
+    ports:
+      - "127.0.0.1:4040:4040"
+    depends_on:
+      - app
+    restart: unless-stopped
+
+  redis:
+    image: redis:7.4-alpine
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?Set REDIS_PASSWORD in .env}
+    command: ["sh", "-ec", "exec /usr/local/bin/docker-entrypoint.sh redis-server --appendonly yes --requirepass \"$$REDIS_PASSWORD\""]
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+
+volumes:
+  redis_data:

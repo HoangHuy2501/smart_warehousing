@@ -1,0 +1,30 @@
+{
+  "name": "smart-whs-v3",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "start": "concurrently -k \"npm:server\" \"npm:ngrok\"",
+    "server": "node src/server.js",
+    "ngrok": "node src/ngrok.js",
+    "worker:receipt": "node src/worker/receipt-sync.worker.js",
+    "worker:iqc": "node src/worker/iqc-sync.worker.js"
+  },
+  "dependencies": {
+    "@bull-board/api": "^9.10.5",
+    "@bull-board/express": "^9.10.5",
+    "@ngrok/ngrok": "^1.7.0",
+    "bullmq": "^6.4.1",
+    "concurrently": "^10.0.6",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.21.2",
+    "ioredis": "^6.0.0",
+    "jsonwebtoken": "^9.0.3",
+    "mssql": "^11.0.1",
+    "pg": "^8.12.0",
+    "swagger-ui-express": "^5.0.1"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.14"
+  }
+}

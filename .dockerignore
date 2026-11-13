@@ -1,0 +1,15 @@
+node_modules/
+.git/
+.env
+.env.*
+**/.env
+**/.env.*
+*.log
+tmp-server.log
+coverage/
+.nyc_output/
+db/
+docs/*
+!docs/swagger.spec.js
+test/*
+!test/db.test.config.js
