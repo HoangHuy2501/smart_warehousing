@@ -811,20 +811,44 @@ async function runCases() {
     }
 
     const returnedCandidates = await IqcSyncRepository.findIqcPendingAllocations(200);
-    check('R: sweep excludes an open RETURNED lot',
-        !returnedCandidates.some((row) => row.allocationId === recheck.allocationId),
+    check('R: sweep includes open RETURNED with initial FAIL_RETURN',
+        returnedCandidates.some((row) => row.allocationId === recheck.allocationId),
         returnedCandidates);
+
+    await db.query(
+        `UPDATE ${TABLES.notice2} SET pro_result = '2', return_qty = 30 WHERE id = ?`,
+        [recheck.notice.id]
+    );
+    const accepted = await iqcSyncService.syncAllocation(recheck.allocationId);
+    const acceptedLot = await readAllocation(recheck.allocationId);
+    check('R: pro_result 0 → 2 reopens an initial return and updates quantities',
+        accepted.state === STATES.MATCHED && acceptedLot.status === 'WAITING_STOCK' &&
+        acceptedLot.iqcDecision === 'FAIL_ACCEPT' && acceptedLot.qtyInStock === 70 &&
+        acceptedLot.qtyReturn === 30,
+        { accepted, acceptedLot });
+
     await db.query(
         `UPDATE ${TABLES.notice2} SET adj_result = '1', return_qty = 0 WHERE id = ?`,
         [recheck.notice.id]
     );
-    const returnedJob = await iqcSyncService.syncAllocation(recheck.allocationId);
-    const returnedLot = await readAllocation(recheck.allocationId);
-    check('R: a queued job leaves RETURNED status and quantities intact',
-        returnedJob.state === STATES.NO_OP && returnedJob.reason === 'status_advanced' &&
-        returnedLot.status === 'RETURNED' && returnedLot.qtyReturn === 100 &&
-        returnedLot.qtyInStock === 0,
-        { returnedJob, returnedLot });
+    const passed = await iqcSyncService.syncAllocation(recheck.allocationId);
+    check('R: a corrected adj_result is also applied',
+        passed.state === STATES.MATCHED && passed.iqcDecision === 'PASS' &&
+        passed.qtyInStock === 100 && passed.qtyReturn === 0, passed);
+
+    await db.query(
+        `UPDATE ${TABLES.notice2} SET adj_result = '2', pro_result = '0', return_qty = 100 WHERE id = ?`,
+        [recheck.notice.id]
+    );
+    await iqcSyncService.syncAllocation(recheck.allocationId);
+    await db.query(`UPDATE ${TABLES.allocation} SET closed_at = NOW() WHERE id = ?`,
+        [recheck.allocationId]);
+    const closedCandidates = await IqcSyncRepository.findIqcPendingAllocations(200);
+    const closedJob = await iqcSyncService.syncAllocation(recheck.allocationId);
+    check('R: a closed return is skipped by sweep and queued jobs',
+        !closedCandidates.some((row) => row.allocationId === recheck.allocationId) &&
+        closedJob.state === STATES.NO_OP && closedJob.reason === 'allocation_closed',
+        closedJob);
 
     // ---- U. Quyết định và số lượng mâu thuẫn, hoặc lượng trả ngoài giới hạn ----
     const invalidCases = [

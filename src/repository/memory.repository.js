@@ -1809,8 +1809,10 @@ function makeMemoryRepository() {
       async findIqcPendingAllocations(limit, cursor) {
         const pending = data.allocations.filter((a) => {
           if (a.closed_at !== null) return false;
+          const provisionalReturn = a.status === 'RETURNED' &&
+            ['FAIL_RETURN', 'MIXED'].includes(a.iqc_decision);
           if (a.warehouse_status === 'IN' ||
-              !['WAITING_IQC', 'WAITING_STOCK'].includes(a.status)) return false;
+              (!['WAITING_IQC', 'WAITING_STOCK'].includes(a.status) && !provisionalReturn)) return false;
           if (!keysetAfter(a, cursor)) return false;
           const receipts = data.receipts.filter((r) => r.allocation_id === a.id);
           return receipts.length > 0 && receipts.every((r) => hasLotValue(r.lot_no));

@@ -319,9 +319,14 @@ function deriveAllocationStatus(summary) {
 function blockedReason(allocation) {
     if (!allocation) return 'allocation_missing';
     if (allocation.closedAt) return 'allocation_closed';
+    // T8 ghi pro_result=0 trước; lô trả hàng còn mở có thể được sửa sau đó.
+    // Với RETURNED, MIXED gồm FAIL_RETURN và FAIL_ACCEPT (cả hai trả toàn bộ).
+    const provisionalReturn = allocation.status === ALLOCATION_STATUS.RETURNED &&
+        [IQC_DECISIONS.FAIL_RETURN, 'MIXED'].includes(allocation.iqcDecision);
     if (allocation.warehouseStatus === WAREHOUSE_STATUS.IN ||
         (allocation.status !== ALLOCATION_STATUS.WAITING_IQC &&
-            allocation.status !== ALLOCATION_STATUS.WAITING_STOCK)) {
+            allocation.status !== ALLOCATION_STATUS.WAITING_STOCK &&
+            !provisionalReturn)) {
         return 'status_advanced';
     }
     return null;
