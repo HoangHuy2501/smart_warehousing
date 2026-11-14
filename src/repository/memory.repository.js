@@ -27,6 +27,7 @@
 
 'use strict';
 
+const { previousMonthCutoff } = require('../util/month-cutoff');
 const { buildSeed } = require('../config/seed-data');
 const { TEST_ACCOUNTS } = require('../config/test-accounts');
 const { noticeCutoffDate } = require('../util/bucket-dates');
@@ -1807,10 +1808,13 @@ function makeMemoryRepository() {
        * receipt mang lot non-empty. Cùng cursor keyset như Receipt Sync.
        */
       async findIqcPendingAllocations(limit, cursor) {
+        const cutoff = previousMonthCutoff();
         const pending = data.allocations.filter((a) => {
           if (a.closed_at !== null) return false;
           const provisionalReturn = a.status === 'RETURNED' &&
-            ['FAIL_RETURN', 'MIXED'].includes(a.iqc_decision);
+            (a.iqc_decision === 'MIXED' ||
+              (a.iqc_decision === 'FAIL_RETURN' &&
+                (a.last_iqc_at == null || new Date(a.last_iqc_at) > cutoff)));
           if (a.warehouse_status === 'IN' ||
               (!['WAITING_IQC', 'WAITING_STOCK'].includes(a.status) && !provisionalReturn)) return false;
           if (!keysetAfter(a, cursor)) return false;

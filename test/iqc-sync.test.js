@@ -850,6 +850,36 @@ async function runCases() {
         closedJob.state === STATES.NO_OP && closedJob.reason === 'allocation_closed',
         closedJob);
 
+    // ---- T. Chỉ bỏ lượt trả toàn bộ do FAIL_RETURN đã đủ một tháng ----
+    const oldQcDate = new Date(Date.now() - 40 * 24 * 60 * 60 * 1000).toISOString();
+    const expired = await fixtureSingle({
+        notice: { sheetQty: 100, adjResult: '2', proResult: '0', qcDate: oldQcDate },
+    });
+    const firstExpired = await iqcSyncService.syncAllocation(expired.allocationId);
+    check('T: an old result still applies the first time',
+        firstExpired.state === STATES.RETURNED, firstExpired);
+
+    const recent = await fixtureSingle({
+        notice: { sheetQty: 100, adjResult: '2', proResult: '0', qcDate: new Date().toISOString() },
+    });
+    await iqcSyncService.syncAllocation(recent.allocationId);
+
+    const candidatesT = await IqcSyncRepository.findIqcPendingAllocations(200);
+    check('T: sweep excludes old FAIL_RETURN but includes recent FAIL_RETURN',
+        !candidatesT.some((row) => row.allocationId === expired.allocationId) &&
+        candidatesT.some((row) => row.allocationId === recent.allocationId), candidatesT);
+
+    await db.query(
+        `UPDATE ${TABLES.notice2} SET pro_result = '2' WHERE id = ?`,
+        [expired.notice.id]
+    );
+    const expiredJob = await iqcSyncService.syncAllocation(expired.allocationId);
+    const expiredLot = await readAllocation(expired.allocationId);
+    check('T: an already queued expired job does not change the saved return',
+        expiredJob.state === STATES.NO_OP && expiredJob.reason === 'fail_return_recheck_expired' &&
+        expiredLot.status === 'RETURNED' && expiredLot.qtyReturn === 100,
+        { expiredJob, expiredLot });
+
     // ---- U. Lượng trả ngoài giới hạn của PASS ----
     const invalidCases = [
         ['negative return', '1', null, -0.00000001, 'iqc_invalid_quantity'],
