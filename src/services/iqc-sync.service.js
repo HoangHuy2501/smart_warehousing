@@ -54,6 +54,7 @@
 
 'use strict';
 
+const { previousMonthCutoff } = require('../util/month-cutoff');
 const db = require('../config/db');
 /** @type {import('../repository/sql/iqc-sync.repository').IqcSyncRepository} */
 const IqcSyncRepository = require('../repository/sql/iqc-sync.repository');
@@ -324,6 +325,10 @@ function blockedReason(allocation) {
     // MIXED có thể gồm nhiều kết quả khác nhau trên cùng một lượt gán kệ.
     const provisionalReturn = allocation.status === ALLOCATION_STATUS.RETURNED &&
         [IQC_DECISIONS.FAIL_RETURN, 'MIXED'].includes(allocation.iqcDecision);
+    if (provisionalReturn && allocation.iqcDecision === IQC_DECISIONS.FAIL_RETURN &&
+        allocation.lastIqcAt != null && new Date(allocation.lastIqcAt) < previousMonthCutoff()) {
+        return 'fail_return_recheck_expired';
+    }
     if (allocation.warehouseStatus === WAREHOUSE_STATUS.IN ||
         (allocation.status !== ALLOCATION_STATUS.WAITING_IQC &&
             allocation.status !== ALLOCATION_STATUS.WAITING_STOCK &&

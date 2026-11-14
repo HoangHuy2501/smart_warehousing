@@ -39,6 +39,7 @@
  */
 
 const db = require('../../config/db');
+const { previousMonthCutoff } = require('../../util/month-cutoff');
 const { TABLES } = require('./tables');
 
 /** Tên bảng logic (viết trong SQL) -> tên thật (kèm tiền tố nếu có). */
@@ -164,7 +165,13 @@ class IqcSyncRepository {
     WHERE a.closed_at IS NULL
       AND (
         a.status IN ('WAITING_IQC', 'WAITING_STOCK')
-        OR (a.status = 'RETURNED' AND a.iqc_decision IN ('FAIL_RETURN', 'MIXED'))
+        OR (
+          a.status = 'RETURNED'
+          AND (
+            a.iqc_decision = 'MIXED'
+            OR (a.iqc_decision = 'FAIL_RETURN' AND (a.last_iqc_at IS NULL OR a.last_iqc_at >= ?))
+          )
+        )
       )
       AND COALESCE(a.warehouse_status, '') <> 'IN'
       AND EXISTS (
@@ -181,7 +188,7 @@ class IqcSyncRepository {
     ORDER BY a.allocated_at ASC, a.id ASC
     OFFSET 0 ROWS FETCH NEXT ? ROWS ONLY;
   `;
-        const params = [];
+        const params = [previousMonthCutoff()];
         if (hasCursor(cursor)) {
             params.push(cursor.allocatedAt, cursor.allocatedAt, cursor.allocationId);
         }
