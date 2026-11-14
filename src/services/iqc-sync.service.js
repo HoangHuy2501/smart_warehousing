@@ -326,7 +326,7 @@ function blockedReason(allocation) {
     const provisionalReturn = allocation.status === ALLOCATION_STATUS.RETURNED &&
         [IQC_DECISIONS.FAIL_RETURN, 'MIXED'].includes(allocation.iqcDecision);
     if (provisionalReturn && allocation.iqcDecision === IQC_DECISIONS.FAIL_RETURN &&
-        allocation.lastIqcAt != null && new Date(allocation.lastIqcAt) <= previousMonthCutoff()) {
+        allocation.lastIqcAt != null && new Date(allocation.lastIqcAt) < previousMonthCutoff()) {
         return 'fail_return_recheck_expired';
     }
     if (allocation.warehouseStatus === WAREHOUSE_STATUS.IN ||

@@ -850,7 +850,7 @@ async function runCases() {
         closedJob.state === STATES.NO_OP && closedJob.reason === 'allocation_closed',
         closedJob);
 
-    // ---- T. Chỉ bỏ lượt trả toàn bộ do FAIL_RETURN đã đủ một tháng ----
+    // ---- T. Chỉ bỏ lượt trả toàn bộ do FAIL_RETURN đã quá một tháng ----
     const oldQcDate = new Date(Date.now() - 40 * 24 * 60 * 60 * 1000).toISOString();
     const expired = await fixtureSingle({
         notice: { sheetQty: 100, adjResult: '2', proResult: '0', qcDate: oldQcDate },

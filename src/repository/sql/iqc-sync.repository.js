@@ -169,7 +169,7 @@ class IqcSyncRepository {
           a.status = 'RETURNED'
           AND (
             a.iqc_decision = 'MIXED'
-            OR (a.iqc_decision = 'FAIL_RETURN' AND (a.last_iqc_at IS NULL OR a.last_iqc_at > ?))
+            OR (a.iqc_decision = 'FAIL_RETURN' AND (a.last_iqc_at IS NULL OR a.last_iqc_at >= ?))
           )
         )
       )
