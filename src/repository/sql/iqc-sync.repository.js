@@ -173,7 +173,7 @@ class IqcSyncRepository {
           )
         )
       )
-      AND COALESCE(a.warehouse_status, '') <> 'IN'
+      AND COALESCE(a.warehouse_status, '') NOT IN ('IN_STOCK', 'IN')
       AND EXISTS (
         SELECT 1
         FROM whs_allocation_receipt r
@@ -225,6 +225,7 @@ class IqcSyncRepository {
       CAST(a.qty_in_stock AS FLOAT) AS [qtyInStock],
       CAST(a.qty_return AS FLOAT) AS [qtyReturn],
       a.last_iqc_at AS [lastIqcAt],
+      a.status_recorded_at AS [statusRecordedAt],
       a.closed_at AS [closedAt]
     FROM whs_slot_allocation a${lockHint}
     WHERE a.id = ?${lockClause};

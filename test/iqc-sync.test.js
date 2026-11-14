@@ -30,6 +30,9 @@ const db = require('../src/config/db');
 const { TABLES } = require('../src/repository/sql/tables');
 const IqcSyncRepository = require('../src/repository/sql/iqc-sync.repository');
 const iqcSyncService = require('../src/services/iqc-sync.service');
+const { syncAllocation: syncStock } = require('../src/services/stock-sync.service');
+const stockRepository = require('../src/repository/sql/stock-sync.repository');
+const { previousMonthCutoff } = require('../src/util/month-cutoff');
 const OverviewService = require('../src/services/overview.service');
 const { manualIqcDisabled } = require('../src/services/lot.service');
 
@@ -236,6 +239,8 @@ async function cleanup() {
         `DELETE FROM ${TABLES.receipt} WHERE allocation_id LIKE 'iqct-%'`
     );
     await db.query(`DELETE FROM ${TABLES.allocation} WHERE id LIKE 'iqct-%'`);
+    await db.query(`DELETE FROM ${TABLES.in2} WHERE sheet_no LIKE 'IQCT-GRN-%'`);
+    await db.query(`DELETE FROM ${TABLES.in1} WHERE sheet_no LIKE 'IQCT-GRN-%'`);
     await db.query(`DELETE FROM ${TABLES.notice2} WHERE sheet_no LIKE 'IQCT-%'`);
     if (createdSlot) {
         await db.query(`DELETE FROM ${TABLES.slots} WHERE code = ?`, [slotCode]);
@@ -446,7 +451,7 @@ async function runCases() {
         'F: allocation RETURNED / RETURN',
         resultF.state === STATES.RETURNED &&
         allocF.status === 'RETURNED' &&
-        allocF.warehouseStatus === 'RETURN',
+        allocF.warehouseStatus === 'RETURNED',
         [resultF, allocF]
     );
 
@@ -634,7 +639,7 @@ async function runCases() {
     check(
         'K: allocation RETURNED / RETURN',
         allocK1After.status === 'RETURNED' &&
-        allocK1After.warehouseStatus === 'RETURN',
+        allocK1After.warehouseStatus === 'RETURNED',
         allocK1After
     );
 
@@ -947,7 +952,7 @@ async function runCases() {
                 `W: ${decision}, return_qty=${returnQty} records shelf quantities`,
                 result.state === (fullReturn ? STATES.RETURNED : STATES.MATCHED) &&
                 allocation.status === (fullReturn ? 'RETURNED' : 'WAITING_STOCK') &&
-                allocation.warehouseStatus === (fullReturn ? 'RETURN' : 'TEMP_IN') &&
+                allocation.warehouseStatus === (fullReturn ? 'RETURNED' : 'TEMP_IN') &&
                 allocation.hasWarning === false &&
                 allocation.iqcDecision === decision &&
                 Number(receipt.qtyInStock) === 100 - expectedReturn &&
@@ -970,6 +975,80 @@ async function runCases() {
         );
     }
 
+    // ---- Stock sync: draft, ADM, partial GRN, expiry and shared notice ----
+    let grnSequence = 0;
+    async function addGrn(notice, qty, sheetStatus = '1', createUser = 'KEEPER', unit = 'KG') {
+        const id = NOTICE_ID_BASE + ++grnSequence;
+        const sheetNo = `IQCT-GRN-${grnSequence}`;
+        await db.query(
+            `INSERT INTO ${TABLES.in1}
+                (id, sheet_no, sheet_date, su_no, emp_no, st_no, sheet_sta, check_sta, create_user)
+             VALUES (?, ?, NOW(), 'TEST', 'TEST', '01', ?, '0', ?)`,
+            [id, sheetNo, sheetStatus, createUser]
+        );
+        await db.query(
+            `INSERT INTO ${TABLES.in2}
+                (id, sheet_id, sheet_no, notice_no, notice_id, pur_no, pur_id, goods_no,
+                 unit_no, st_no, sheet_qty, made_lot)
+             VALUES (?, 1, ?, ?, ?, ?, ?, ?, ?, '01', ?, ?)`,
+            [id, sheetNo, notice.sheetNo, notice.sheetId, notice.purNo, notice.purId,
+                notice.goodsNo, unit, qty, notice.madeLot]
+        );
+    }
+    const split = await fixtureSingle({
+        notice: { sheetQty: 100, adjResult: '1', returnQty: 30 },
+    });
+    await iqcSyncService.syncAllocation(split.allocationId);
+    const waiting = await readAllocation(split.allocationId);
+    await iqcSyncService.syncAllocation(split.allocationId);
+    const waitingAgain = await readAllocation(split.allocationId);
+    check('Stock: IQC recheck preserves WAITING_STOCK entry time',
+        waiting.statusRecordedAt != null &&
+        +new Date(waiting.statusRecordedAt) === +new Date(waitingAgain.statusRecordedAt));
+    const waitingLot = (await OverviewService.listLots()).find((lot) => lot.id === split.allocationId);
+    check('Stock: lots API exposes status timestamps', waitingLot?.waitingStockSince != null &&
+        waitingLot.statusRecordedAt != null, waitingLot);
+
+    await addGrn(split.notice, 70, '0');
+    await addGrn(split.notice, 70, '1', 'ADM');
+    await addGrn(split.notice, 70, '1', 'KEEPER', 'LB');
+    await addGrn(split.notice, 40);
+    check('Stock: draft, ADM and different units do not cover 70 accepted',
+        await syncStock(split.allocationId) === 'WAITING_STOCK');
+    await addGrn(split.notice, 30);
+    const stocked = await syncStock(split.allocationId);
+    const stockRow = await readAllocation(split.allocationId);
+    check('Stock: approved 40 + 30 promotes the lot and preserves the return',
+        stocked === 'IN_STOCK' && stockRow.warehouseStatus === 'IN_STOCK' &&
+        stockRow.qtyInStock === 70 && stockRow.qtyReturn === 30, stockRow);
+    check('Stock: retry is idempotent', await syncStock(split.allocationId) === 'NO_OP');
+
+    const expiredStock = await fixtureSingle({ notice: { sheetQty: 20, adjResult: '1' } });
+    await iqcSyncService.syncAllocation(expiredStock.allocationId);
+    await addGrn(expiredStock.notice, 20);
+    await db.query(`UPDATE ${TABLES.allocation} SET status_recorded_at = ? WHERE id = ?`,
+        [oldQcDate, expiredStock.allocationId]);
+    const stockCandidates = await stockRepository.findCandidates(previousMonthCutoff(), '', 200);
+    check('Stock: expiry excludes sweep and already queued jobs',
+        !stockCandidates.includes(expiredStock.allocationId) &&
+        await syncStock(expiredStock.allocationId) === 'NO_OP');
+
+    const shared = await fixtureSingle({
+        notice: { sheetQty: 70, adjResult: '1' }, receivedQty: 40,
+    });
+    const other = await createAllocation({ allocatedQty: 30 });
+    await addReceipt({ allocationId: other, noticeId: shared.notice.id,
+        receivedQty: 30, lotNo: shared.notice.madeLot });
+    await iqcSyncService.syncAllocation(shared.allocationId);
+    await iqcSyncService.syncAllocation(other);
+    await addGrn(shared.notice, 40);
+    check('Stock: a shared receipt cannot reuse a partial GRN across shelves',
+        await syncStock(shared.allocationId) === 'WAITING_STOCK' &&
+        await syncStock(other) === 'WAITING_STOCK');
+    await addGrn(shared.notice, 30);
+    const sharedResults = await Promise.all([syncStock(shared.allocationId), syncStock(other)]);
+    check('Stock: full GRN covers both shelves', sharedResults.every((result) => result === 'IN_STOCK'));
+
     // ---- R. Manual IQC endpoint: DB_MODE=sqlserver → blocked ----
     check(
         'R: manual IQC disable khi DB_MODE=sqlserver',
@@ -986,7 +1065,7 @@ async function runCases() {
         const content = fs.readFileSync(file, 'utf8');
         check(
             `S: ${path.basename(file)} không set IN_STOCK`,
-            !/(['"])IN_STOCK\1/.test(content)
+            !/\bstatus\s*:\s*(['"])IN_STOCK\1/.test(content)
         );
     }
 

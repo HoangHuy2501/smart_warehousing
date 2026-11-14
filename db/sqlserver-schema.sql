@@ -196,7 +196,8 @@ CREATE TABLE dbo.t8_pur_in1 (
   emp_no     NVARCHAR(20) NOT NULL,
   st_no      NVARCHAR(20) NOT NULL,
   sheet_sta  CHAR(1)      NOT NULL,
-  check_sta  CHAR(1)      NOT NULL
+  check_sta  CHAR(1)      NOT NULL,
+  create_user NVARCHAR(20) NOT NULL DEFAULT 'FIXTURE'
 );
 GO
 
@@ -280,6 +281,7 @@ CREATE TABLE dbo.whs_slot_allocation (
   qty_in_stock        NUMERIC(18,8) NULL,
   qty_return          NUMERIC(18,8) NULL,
   qty_aod             NUMERIC(18,8) NULL,
+  status_recorded_at  DATETIME2     NULL,
   last_iqc_at         DATETIME2     NULL,
   allocated_by_emp_no NVARCHAR(20)  NOT NULL,
   allocated_at        DATETIME2     NOT NULL,
