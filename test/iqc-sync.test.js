@@ -782,7 +782,7 @@ async function runCases() {
     const recheck = await fixtureSingle({ notice: { sheetQty: 100, adjResult: '1' } });
     await iqcSyncService.syncAllocation(recheck.allocationId);
     const corrections = [
-        { adj: '2', pro: '2', returned: 30, status: 'WAITING_STOCK', received: 70 },
+        { adj: '1', pro: '0', returned: 30, status: 'WAITING_STOCK', received: 70 },
         { adj: '3', pro: '0', returned: 0, status: 'WAITING_STOCK', received: 100 },
         { adj: '0', pro: '0', returned: 0, status: 'WAITING_IQC', received: 0 },
         { adj: '1', pro: '0', returned: 0, status: 'WAITING_STOCK', received: 100 },
@@ -816,15 +816,15 @@ async function runCases() {
         returnedCandidates);
 
     await db.query(
-        `UPDATE ${TABLES.notice2} SET pro_result = '2', return_qty = 30 WHERE id = ?`,
+        `UPDATE ${TABLES.notice2} SET pro_result = '2' WHERE id = ?`,
         [recheck.notice.id]
     );
     const accepted = await iqcSyncService.syncAllocation(recheck.allocationId);
     const acceptedLot = await readAllocation(recheck.allocationId);
     check('R: pro_result 0 → 2 reopens an initial return and updates quantities',
         accepted.state === STATES.MATCHED && acceptedLot.status === 'WAITING_STOCK' &&
-        acceptedLot.iqcDecision === 'FAIL_ACCEPT' && acceptedLot.qtyInStock === 70 &&
-        acceptedLot.qtyReturn === 30,
+        acceptedLot.iqcDecision === 'FAIL_ACCEPT' && acceptedLot.qtyInStock === 100 &&
+        acceptedLot.qtyReturn === 0,
         { accepted, acceptedLot });
 
     await db.query(
@@ -850,12 +850,10 @@ async function runCases() {
         closedJob.state === STATES.NO_OP && closedJob.reason === 'allocation_closed',
         closedJob);
 
-    // ---- U. Quyết định và số lượng mâu thuẫn, hoặc lượng trả ngoài giới hạn ----
+    // ---- U. Lượng trả ngoài giới hạn của PASS ----
     const invalidCases = [
-        ['PASS with full return', '1', null, 100, 'iqc_decision_quantity_mismatch'],
-        ['EXEMPT with full return', '3', null, 100, 'iqc_decision_quantity_mismatch'],
         ['negative return', '1', null, -0.00000001, 'iqc_invalid_quantity'],
-        ['return above sheet quantity', '2', '0', 100.00000001, 'iqc_invalid_quantity'],
+        ['return above sheet quantity', '1', null, 100.00000001, 'iqc_invalid_quantity'],
     ];
     for (const [label, adjResult, proResult, returnQty, reason] of invalidCases) {
         const fixture = await fixtureSingle({
@@ -897,35 +895,41 @@ async function runCases() {
         [resultV, allocationV, receiptV]
     );
 
-    // ---- W. Cả hai mã xử lý FAIL đều dùng số lượng trả từ T8 ----
-    const failFixtures = [];
-    for (const [proResult, decision] of [['0', 'FAIL_RETURN'], ['2', 'FAIL_ACCEPT']]) {
+    // ---- W. Chỉ PASS dùng return_qty ----
+    const quantityFixtures = [];
+    for (const [adjResult, proResult, decision] of [
+        ['2', '0', 'FAIL_RETURN'],
+        ['2', '2', 'FAIL_ACCEPT'],
+        ['1', '0', 'PASS'],
+        ['3', '0', 'EXEMPT'],
+    ]) {
         for (const returnQty of [0, 30, 100]) {
             const fixture = await fixtureSingle({
-                notice: { sheetQty: 100, adjResult: '2', proResult, returnQty },
+                notice: { sheetQty: 100, adjResult, proResult, returnQty },
                 receivedQty: 100,
             });
             const result = await iqcSyncService.syncAllocation(fixture.allocationId);
             const allocation = await readAllocation(fixture.allocationId);
             const [receipt] = await readReceipts(fixture.allocationId);
-            const fullReturn = returnQty === 100;
+            const expectedReturn = decision === 'PASS' ? returnQty : decision === 'FAIL_RETURN' ? 100 : 0;
+            const fullReturn = expectedReturn === 100;
             check(
-                `W: FAIL pro_result=${proResult}, return_qty=${returnQty} records shelf quantities`,
+                `W: ${decision}, return_qty=${returnQty} records shelf quantities`,
                 result.state === (fullReturn ? STATES.RETURNED : STATES.MATCHED) &&
                 allocation.status === (fullReturn ? 'RETURNED' : 'WAITING_STOCK') &&
                 allocation.warehouseStatus === (fullReturn ? 'RETURN' : 'TEMP_IN') &&
                 allocation.hasWarning === false &&
                 allocation.iqcDecision === decision &&
-                Number(receipt.qtyInStock) === 100 - returnQty &&
-                Number(receipt.qtyReturn) === returnQty,
+                Number(receipt.qtyInStock) === 100 - expectedReturn &&
+                Number(receipt.qtyReturn) === expectedReturn,
                 [result, allocation, receipt]
             );
-            failFixtures.push({ id: fixture.allocationId, returnQty });
+            quantityFixtures.push({ id: fixture.allocationId, returnQty: expectedReturn });
         }
     }
 
     const lots = await OverviewService.listLots();
-    for (const { id, returnQty } of failFixtures) {
+    for (const { id, returnQty } of quantityFixtures) {
         const lot = lots.find((item) => item.id === id);
         check(
             'W: lots API payload includes shelf and IQC quantities',
