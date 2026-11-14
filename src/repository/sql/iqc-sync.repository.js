@@ -361,7 +361,11 @@ class IqcSyncRepository {
       iqc.pro_result AS [proResult],
       iqc.qc_date AS [qcDate]
     FROM v_pur_notice_detail iqc
-    WHERE ${identities.map(() => groupSql.trim()).join('\n      OR ')};
+    WHERE iqc.sheet_sta1 <> '0'
+      AND iqc.create_user <> 'ADM'
+      AND (
+        ${identities.map(() => groupSql.trim()).join('\n        OR ')}
+      );
   `;
         const params = [];
         for (const identity of identities) {
