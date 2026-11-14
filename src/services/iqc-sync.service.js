@@ -92,8 +92,8 @@ const ALLOCATION_STATUS = {
 
 const WAREHOUSE_STATUS = {
     TEMP_IN: 'TEMP_IN',
-    IN: 'IN',
-    RETURN: 'RETURN',
+    IN_STOCK: 'IN_STOCK',
+    RETURNED: 'RETURNED',
 };
 
 /** Mã T8 (CHAR(1) trong DB thật, có thể numeric trong fixture test). */
@@ -302,7 +302,7 @@ function deriveAllocationStatus(summary) {
         if (summary.qtyReturn > 0) {
             return {
                 status: ALLOCATION_STATUS.RETURNED,
-                warehouseStatus: WAREHOUSE_STATUS.RETURN,
+                warehouseStatus: WAREHOUSE_STATUS.RETURNED,
             };
         }
     }
@@ -329,7 +329,7 @@ function blockedReason(allocation) {
         allocation.lastIqcAt != null && new Date(allocation.lastIqcAt) < previousMonthCutoff()) {
         return 'fail_return_recheck_expired';
     }
-    if (allocation.warehouseStatus === WAREHOUSE_STATUS.IN ||
+    if ([WAREHOUSE_STATUS.IN_STOCK, 'IN'].includes(allocation.warehouseStatus) ||
         (allocation.status !== ALLOCATION_STATUS.WAITING_IQC &&
             allocation.status !== ALLOCATION_STATUS.WAITING_STOCK &&
             !provisionalReturn)) {

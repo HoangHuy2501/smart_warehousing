@@ -173,7 +173,7 @@ class IqcSyncRepository {
           )
         )
       )
-      AND COALESCE(a.warehouse_status, '') <> 'IN'
+      AND COALESCE(a.warehouse_status, '') NOT IN ('IN_STOCK', 'IN')
       AND EXISTS (
         SELECT 1
         FROM whs_allocation_receipt r

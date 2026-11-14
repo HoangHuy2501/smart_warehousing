@@ -83,7 +83,7 @@ async function main() {
     }
     // PO 16 da inject IQC PASS -> warehouse_status IN (TEMP_IN la gia tri
     // ngay sau khi receipt duoc tao; kiem tra o check receipt phia tren).
-    check('E: warehouse_status PO 16 = IN (sau IQC PASS)', alloc16.rows[0] && alloc16.rows[0].warehouse_status === 'IN', alloc16.rows[0]);
+    check('E: warehouse_status PO 16 = IN_STOCK (sau IQC PASS)', alloc16.rows[0] && alloc16.rows[0].warehouse_status === 'IN_STOCK', alloc16.rows[0]);
 
     // Case E (T8 read-only): notice 14 khong bi ghi (adj_result/qc_date nguyen ven)
     const n14 = await c.query("select adj_result, pro_result, qc_date, qc_emp_no, sheet_qty from whs3_t8_pur_notice2 where id = 14");

@@ -38,7 +38,7 @@ async function syncAllocation(id) {
 
         await allocations.updateAllocationIqcSummary(id, {
             status: 'IN_STOCK',
-            warehouse_status: 'IN',
+            warehouse_status: 'IN_STOCK',
             status_recorded_at: new Date(),
         }, tx);
         return 'IN_STOCK';

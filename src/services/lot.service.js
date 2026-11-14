@@ -30,7 +30,7 @@
  *   không INSERT duplicate.
  *
  * Máy trạng thái IQC (status FE + warehouse_status kho):
- *   PASS / EXEMPT   → IN_STOCK  + 'IN'
+ *   PASS / EXEMPT   → IN_STOCK  + 'IN_STOCK'
  *   FAIL_PENDING    → giữ WAITING_IQC + has_warning = 1, warehouse 'TEMP_IN'
  *   RETURN          → RETURNED  + 'RETURN'
  * Kết quả IQC được áp lên allocation (nguồn thật) và mirror xuống receipt;
@@ -276,7 +276,7 @@ class LotServices {
       case 'PASS':
       case 'EXEMPT':
         nextStatus = 'IN_STOCK';
-        nextWarehouse = 'IN';
+        nextWarehouse = 'IN_STOCK';
         nextInStock = lot.qty;
         nextReturn = null;
         nextAod = null;
@@ -295,7 +295,7 @@ class LotServices {
         break;
       case 'RETURN':
         nextStatus = 'RETURNED';
-        nextWarehouse = 'RETURN';
+        nextWarehouse = 'RETURNED';
         nextInStock = null;
         nextReturn = lot.qty;
         nextAod = null;

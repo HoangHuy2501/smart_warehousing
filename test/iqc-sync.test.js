@@ -451,7 +451,7 @@ async function runCases() {
         'F: allocation RETURNED / RETURN',
         resultF.state === STATES.RETURNED &&
         allocF.status === 'RETURNED' &&
-        allocF.warehouseStatus === 'RETURN',
+        allocF.warehouseStatus === 'RETURNED',
         [resultF, allocF]
     );
 
@@ -639,7 +639,7 @@ async function runCases() {
     check(
         'K: allocation RETURNED / RETURN',
         allocK1After.status === 'RETURNED' &&
-        allocK1After.warehouseStatus === 'RETURN',
+        allocK1After.warehouseStatus === 'RETURNED',
         allocK1After
     );
 
@@ -952,7 +952,7 @@ async function runCases() {
                 `W: ${decision}, return_qty=${returnQty} records shelf quantities`,
                 result.state === (fullReturn ? STATES.RETURNED : STATES.MATCHED) &&
                 allocation.status === (fullReturn ? 'RETURNED' : 'WAITING_STOCK') &&
-                allocation.warehouseStatus === (fullReturn ? 'RETURN' : 'TEMP_IN') &&
+                allocation.warehouseStatus === (fullReturn ? 'RETURNED' : 'TEMP_IN') &&
                 allocation.hasWarning === false &&
                 allocation.iqcDecision === decision &&
                 Number(receipt.qtyInStock) === 100 - expectedReturn &&
@@ -1019,7 +1019,7 @@ async function runCases() {
     const stocked = await syncStock(split.allocationId);
     const stockRow = await readAllocation(split.allocationId);
     check('Stock: approved 40 + 30 promotes the lot and preserves the return',
-        stocked === 'IN_STOCK' && stockRow.warehouseStatus === 'IN' &&
+        stocked === 'IN_STOCK' && stockRow.warehouseStatus === 'IN_STOCK' &&
         stockRow.qtyInStock === 70 && stockRow.qtyReturn === 30, stockRow);
     check('Stock: retry is idempotent', await syncStock(split.allocationId) === 'NO_OP');
 
@@ -1065,7 +1065,7 @@ async function runCases() {
         const content = fs.readFileSync(file, 'utf8');
         check(
             `S: ${path.basename(file)} không set IN_STOCK`,
-            !/(['"])IN_STOCK\1/.test(content)
+            !/\bstatus\s*:\s*(['"])IN_STOCK\1/.test(content)
         );
     }
 

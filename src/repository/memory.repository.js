@@ -1816,7 +1816,7 @@ function makeMemoryRepository() {
             (a.iqc_decision === 'MIXED' ||
               (a.iqc_decision === 'FAIL_RETURN' &&
                 (a.last_iqc_at == null || new Date(a.last_iqc_at) >= cutoff)));
-          if (a.warehouse_status === 'IN' ||
+          if (['IN_STOCK', 'IN'].includes(a.warehouse_status) ||
               (!['WAITING_IQC', 'WAITING_STOCK'].includes(a.status) && !provisionalReturn)) return false;
           if (!keysetAfter(a, cursor)) return false;
           const receipts = data.receipts.filter((r) => r.allocation_id === a.id);
