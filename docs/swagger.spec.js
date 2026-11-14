@@ -103,6 +103,8 @@ const LOT_SCHEMA = {
     qtyInStock: { type: 'number', nullable: true },
     qtyReturn: { type: 'number', nullable: true },
     iqcUpdatedAt: { type: 'string', format: 'date-time', nullable: true },
+    statusRecordedAt: { type: 'string', format: 'date-time', nullable: true },
+    waitingStockSince: { type: 'string', format: 'date-time', nullable: true },
     iqcHistory: IQC_HISTORY_SCHEMA,
     source: { type: 'string', example: 'mock' },
   },

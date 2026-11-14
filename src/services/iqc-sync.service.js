@@ -541,16 +541,16 @@ class IqcSyncServices {
             const partialReceipts = fresh.filter(
                 (receipt) => plan.get(String(receipt.id)).shape === QUANTITY_SHAPE.PARTIAL
             );
+            // Cùng thứ tự khóa allocation → notice với Receipt Sync và Stock Sync.
+            const noticeIds = [...new Set(fresh.map((receipt) => Number(receipt.noticeDetailId)))]
+                .sort((a, b) => a - b);
+            for (const noticeId of noticeIds) {
+                await ReceiptSyncRepository.acquireNoticeLock(noticeId, tx);
+            }
             if (partialReceipts.length > 0) {
-                const noticeIds = [...new Set(
-                    partialReceipts.map((receipt) => Number(receipt.noticeDetailId))
-                )].sort((a, b) => a - b);
-                // Receipt Sync uses the same allocation → notice lock order.
-                for (const noticeId of noticeIds) {
-                    await ReceiptSyncRepository.acquireNoticeLock(noticeId, tx);
-                }
+                const partialNoticeIds = partialReceipts.map((receipt) => Number(receipt.noticeDetailId));
                 const activeCounts = buildActiveAllocationCounts(
-                    await IqcSyncRepository.countActiveAllocationsByNoticeIds(noticeIds, tx)
+                    await IqcSyncRepository.countActiveAllocationsByNoticeIds(partialNoticeIds, tx)
                 );
                 const ambiguous = partialReceipts.find((receipt) => {
                     const { iqcRow } = plan.get(String(receipt.id));
@@ -606,6 +606,7 @@ class IqcSyncServices {
                 allocationId,
                 {
                     status: status.status,
+                    ...(current.status !== status.status ? { status_recorded_at: updatedAt } : {}),
                     warehouse_status: status.warehouseStatus,
                     iqc_decision: summary.iqcDecision,
                     qty_in_stock: summary.qtyInStock,

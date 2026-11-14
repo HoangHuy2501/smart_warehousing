@@ -525,6 +525,7 @@ function makeMemoryRepository() {
       qtyInStock: numOrNull(a.qty_in_stock),
       qtyReturn: numOrNull(a.qty_return),
       iqcUpdatedAt: isoOrNull(a.last_iqc_at),
+      statusRecordedAt: isoOrNull(a.status_recorded_at),
       source: 'mock',
       poId: a.po_id,
       goodsNo: a.goods_no,
