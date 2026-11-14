@@ -21,7 +21,8 @@
  *   sheet_id, pur_no, pur_id, goods_no, made_lot) → query view theo ĐỦ 6
  *   khóa. 0 dòng → WAITING_IQC; >1 dòng → warning, KHÔNG TOP 1, KHÔNG
  *   fallback goods_no + lot hay pur_no + goods_no.
- * - Với FAIL, cả pro_result 0 và 2 đều tính nhận/trả theo return_qty.
+ * - FAIL_RETURN trả toàn bộ, FAIL_ACCEPT và EXEMPT nhận toàn bộ.
+ *   Chỉ PASS phân loại số lượng nhận/trả theo return_qty.
  * - Quantity KHÔNG double-count: một notice có thể chia nhiều allocation.
  *   KHÔNG phụ thuộc GRN in_qty — IQC chạy TRƯỚC GRN, in_qty chỉ phản ánh
  *   đơn nhập kho đã ghi:
@@ -181,7 +182,7 @@ function mapIqcDecision(iqcRow) {
 }
 
 /**
- * Phân loại số lượng IQC trước GRN. NULL return_qty được xem là chưa có
+ * Phân loại số lượng PASS trước GRN. NULL return_qty được xem là chưa có
  * số lượng trả. Dữ liệu ngoài giới hạn trả null để caller bật cảnh báo.
  */
 function classifyQuantity(iqcRow) {
@@ -319,9 +320,14 @@ function deriveAllocationStatus(summary) {
 function blockedReason(allocation) {
     if (!allocation) return 'allocation_missing';
     if (allocation.closedAt) return 'allocation_closed';
+    // T8 ghi pro_result=0 trước; lô trả hàng còn mở có thể được sửa sau đó.
+    // MIXED có thể gồm nhiều kết quả khác nhau trên cùng một lượt gán kệ.
+    const provisionalReturn = allocation.status === ALLOCATION_STATUS.RETURNED &&
+        [IQC_DECISIONS.FAIL_RETURN, 'MIXED'].includes(allocation.iqcDecision);
     if (allocation.warehouseStatus === WAREHOUSE_STATUS.IN ||
         (allocation.status !== ALLOCATION_STATUS.WAITING_IQC &&
-            allocation.status !== ALLOCATION_STATUS.WAITING_STOCK)) {
+            allocation.status !== ALLOCATION_STATUS.WAITING_STOCK &&
+            !provisionalReturn)) {
         return 'status_advanced';
     }
     return null;
@@ -400,11 +406,21 @@ async function buildReceiptPlan(receipts, isRecheck) {
             return { state: IQC_SYNC_STATES.WAITING_IQC, reason: 'iqc_waiting' };
         }
 
-        const shape = decision === IQC_DECISIONS.WAITING ? null : classifyQuantity(iqcRow);
-        const inconsistent = shape === QUANTITY_SHAPE.FULL_RETURN &&
-            (decision === IQC_DECISIONS.PASS || decision === IQC_DECISIONS.EXEMPT);
-        if (decision !== IQC_DECISIONS.WAITING && (!shape || inconsistent)) {
-            const reason = shape ? 'iqc_decision_quantity_mismatch' : 'iqc_invalid_quantity';
+        let shape = null;
+        switch (decision) {
+            case IQC_DECISIONS.FAIL_RETURN:
+                shape = QUANTITY_SHAPE.FULL_RETURN;
+                break;
+            case IQC_DECISIONS.FAIL_ACCEPT:
+            case IQC_DECISIONS.EXEMPT:
+                shape = QUANTITY_SHAPE.FULL_ACCEPT;
+                break;
+            case IQC_DECISIONS.PASS:
+                shape = classifyQuantity(iqcRow);
+                break;
+        }
+        if (decision === IQC_DECISIONS.PASS && !shape) {
+            const reason = 'iqc_invalid_quantity';
             logger.warn(reason, {
                 allocationId: receipt.allocationId,
                 noticeDetailId: Number(receipt.noticeDetailId),

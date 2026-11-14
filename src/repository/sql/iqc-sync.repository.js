@@ -162,7 +162,10 @@ class IqcSyncRepository {
       a.allocated_at AS [allocatedAt]
     FROM whs_slot_allocation a
     WHERE a.closed_at IS NULL
-      AND a.status IN ('WAITING_IQC', 'WAITING_STOCK')
+      AND (
+        a.status IN ('WAITING_IQC', 'WAITING_STOCK')
+        OR (a.status = 'RETURNED' AND a.iqc_decision IN ('FAIL_RETURN', 'MIXED'))
+      )
       AND COALESCE(a.warehouse_status, '') <> 'IN'
       AND EXISTS (
         SELECT 1
