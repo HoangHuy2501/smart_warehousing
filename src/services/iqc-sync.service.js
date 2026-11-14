@@ -5,7 +5,7 @@
  *
  * ĐÚNG MỘT ĐƯỜNG CHẠY (đọc từ trên xuống):
  *   nhận allocationId (từ queue/sweep)
- *   → load allocation            → thiếu / đã đóng / không WAITING_IQC → NO_OP
+ *   → load allocation            → thiếu / đã đóng / ngoài trạng thái theo dõi IQC → NO_OP
  *   → load receipt mapping       → chưa có receipt / receipt chưa có lot → WAITING_IQC
  *   → load notice identity (pur_notice2)  → thiếu → DATA_ERROR
  *   → load IQC rows (v_pur_notice_detail) theo ĐỦ 6 khóa identity
@@ -33,7 +33,7 @@
  *       và receipt.received_qty = sheet_qty → qty_in_stock =
  *       sheet_qty - return_qty, qty_return = return_qty.
  *       Partial + multi-allocation → KHÔNG chia tỷ lệ/FIFO/LIFO → giữ
- *       WAITING_IQC + has_warning (state PARTIAL_AMBIGUOUS).
+ *       trạng thái hiện tại + has_warning (state PARTIAL_AMBIGUOUS).
  * - Receipt chỉ ghi: iqc_decision, qty_in_stock, qty_return, qc_date,
  *   has_warning, updated_at. KHÔNG ghi qty_aod.
  * - Allocation tổng hợp từ receipt: SUM(qty_in_stock) / SUM(qty_return);
@@ -90,6 +90,7 @@ const ALLOCATION_STATUS = {
 
 const WAREHOUSE_STATUS = {
     TEMP_IN: 'TEMP_IN',
+    IN: 'IN',
     RETURN: 'RETURN',
 };
 
@@ -208,6 +209,16 @@ function classifyQuantity(iqcRow) {
  * @returns {Record<string, unknown>}
  */
 function buildReceiptIqcPatch(receipt, iqcRow, entry, updatedAt) {
+    if (entry.decision === IQC_DECISIONS.WAITING) {
+        return {
+            iqc_decision: entry.decision,
+            qty_in_stock: null,
+            qty_return: null,
+            qc_date: null,
+            has_warning: false,
+            updated_at: updatedAt,
+        };
+    }
     if (entry.shape === QUANTITY_SHAPE.PARTIAL) {
         const sheetQty = Number(iqcRow.sheetQty || 0);
         const returnQty = Number(iqcRow.returnQty || 0);
@@ -229,6 +240,10 @@ function buildReceiptIqcPatch(receipt, iqcRow, entry, updatedAt) {
         has_warning: false,
         updated_at: updatedAt,
     };
+}
+
+function dateValue(value) {
+    return value == null ? null : new Date(value).getTime();
 }
 
 /**
@@ -304,7 +319,9 @@ function deriveAllocationStatus(summary) {
 function blockedReason(allocation) {
     if (!allocation) return 'allocation_missing';
     if (allocation.closedAt) return 'allocation_closed';
-    if (allocation.status !== ALLOCATION_STATUS.WAITING_IQC) {
+    if (allocation.warehouseStatus === WAREHOUSE_STATUS.IN ||
+        (allocation.status !== ALLOCATION_STATUS.WAITING_IQC &&
+            allocation.status !== ALLOCATION_STATUS.WAITING_STOCK)) {
         return 'status_advanced';
     }
     return null;
@@ -332,7 +349,7 @@ function buildActiveAllocationCounts(rows) {
  * @returns {Promise<{ state?: string, reason?: string,
  *   hasWarning?: boolean, plan?: Map<string, object> }>}
  */
-async function buildReceiptPlan(receipts) {
+async function buildReceiptPlan(receipts, isRecheck) {
     const noticeIds = [...new Set(receipts.map((r) => Number(r.noticeDetailId)))];
     const notices = await IqcSyncRepository.findNoticeIdentitiesByIds(noticeIds);
     const noticeById = new Map(notices.map((n) => [Number(n.noticeDetailId), n]));
@@ -379,14 +396,14 @@ async function buildReceiptPlan(receipts) {
             });
             return { state: IQC_SYNC_STATES.PARTIAL_AMBIGUOUS, reason: 'iqc_unknown_code' };
         }
-        if (decision === IQC_DECISIONS.WAITING) {
+        if (decision === IQC_DECISIONS.WAITING && !isRecheck) {
             return { state: IQC_SYNC_STATES.WAITING_IQC, reason: 'iqc_waiting' };
         }
 
-        const shape = classifyQuantity(iqcRow);
+        const shape = decision === IQC_DECISIONS.WAITING ? null : classifyQuantity(iqcRow);
         const inconsistent = shape === QUANTITY_SHAPE.FULL_RETURN &&
             (decision === IQC_DECISIONS.PASS || decision === IQC_DECISIONS.EXEMPT);
-        if (!shape || inconsistent) {
+        if (decision !== IQC_DECISIONS.WAITING && (!shape || inconsistent)) {
             const reason = shape ? 'iqc_decision_quantity_mismatch' : 'iqc_invalid_quantity';
             logger.warn(reason, {
                 allocationId: receipt.allocationId,
@@ -439,7 +456,10 @@ class IqcSyncServices {
             };
         }
 
-        const planResult = await buildReceiptPlan(receipts);
+        const planResult = await buildReceiptPlan(
+            receipts,
+            allocation.iqcDecision != null || allocation.status !== ALLOCATION_STATUS.WAITING_IQC
+        );
         if (!planResult.plan) {
             if (planResult.hasWarning || planResult.state === IQC_SYNC_STATES.PARTIAL_AMBIGUOUS) {
                 // Chỉ bật cờ cảnh báo — KHÔNG ghi quantity, KHÔNG đổi status.
@@ -469,7 +489,8 @@ class IqcSyncServices {
             await ReceiptSyncRepository.acquireAllocationLock(allocationId, tx);
             const current = await IqcSyncRepository.findAllocationForIqc(
                 allocationId,
-                tx
+                tx,
+                true
             );
             const blocked = blockedReason(current);
             if (blocked) {
@@ -527,10 +548,18 @@ class IqcSyncServices {
 
             const updatedAt = new Date();
             const patched = [];
+            let receiptsChanged = false;
             for (const receipt of fresh) {
                 const entry = plan.get(String(receipt.id));
                 const patch = buildReceiptIqcPatch(receipt, entry.iqcRow, entry, updatedAt);
-                await ReceiptRepository.updateReceipt(receipt.id, patch, tx);
+                if (receipt.iqcDecision !== patch.iqc_decision ||
+                    receipt.qtyInStock !== patch.qty_in_stock ||
+                    receipt.qtyReturn !== patch.qty_return ||
+                    dateValue(receipt.qcDate) !== dateValue(patch.qc_date) ||
+                    Boolean(receipt.hasWarning)) {
+                    await ReceiptRepository.updateReceipt(receipt.id, patch, tx);
+                    receiptsChanged = true;
+                }
                 patched.push({
                     iqcDecision: entry.decision,
                     qtyInStock: patch.qty_in_stock,
@@ -541,6 +570,17 @@ class IqcSyncServices {
 
             const summary = aggregateAllocationIqc(patched);
             const status = deriveAllocationStatus(summary);
+            if (!receiptsChanged &&
+                current.status === status.status &&
+                current.warehouseStatus === status.warehouseStatus &&
+                current.iqcDecision === summary.iqcDecision &&
+                current.qtyInStock === summary.qtyInStock &&
+                current.qtyReturn === summary.qtyReturn &&
+                dateValue(current.lastIqcAt) === dateValue(summary.lastIqcAt) &&
+                !current.hasWarning) {
+                return { state: IQC_SYNC_STATES.NO_OP, allocationId, reason: 'iqc_unchanged' };
+            }
+
             await IqcSyncRepository.updateAllocationIqcSummary(
                 allocationId,
                 {
@@ -556,10 +596,11 @@ class IqcSyncServices {
             );
 
             return {
-                state:
-                    status.status === ALLOCATION_STATUS.RETURNED
-                        ? IQC_SYNC_STATES.RETURNED
-                        : IQC_SYNC_STATES.MATCHED,
+                state: {
+                    [ALLOCATION_STATUS.WAITING_IQC]: IQC_SYNC_STATES.WAITING_IQC,
+                    [ALLOCATION_STATUS.WAITING_STOCK]: IQC_SYNC_STATES.MATCHED,
+                    [ALLOCATION_STATUS.RETURNED]: IQC_SYNC_STATES.RETURNED,
+                }[status.status],
                 allocationId,
                 qtyInStock: summary.qtyInStock,
                 qtyReturn: summary.qtyReturn,
@@ -580,7 +621,8 @@ class IqcSyncServices {
             await ReceiptSyncRepository.acquireAllocationLock(allocationId, tx);
             const current = await IqcSyncRepository.findAllocationForIqc(
                 allocationId,
-                tx
+                tx,
+                true
             );
             if (blockedReason(current)) return;
             await IqcSyncRepository.updateAllocationIqcSummary(
