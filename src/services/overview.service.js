@@ -45,6 +45,7 @@ const LotRepository = require('../repository/sql/lot.repository');
 const PoRepository = require('../repository/sql/po.repository');
 /** @type {import('../repository/sql/receipt.repository').ReceiptModel} */
 const ReceiptRepository = require('../repository/sql/receipt.repository');
+const OutboundRepository = require('../repository/sql/outbound.repository');
 /** @type {import('../repository/sql/activity.repository').ActivityModel} */
 const ActivityRepository = require('../repository/sql/activity.repository');
 
@@ -172,8 +173,13 @@ class OverviewServices {
       });
       byAllocation.set(r.allocationId, list);
     }
+    const stockIds = rows.filter((row) => row.status === 'IN_STOCK').map((row) => row.id);
+    const outbound = process.env.OUTBOUND_SYNC_START_DATE
+      ? await OutboundRepository.quantitiesByAllocation(stockIds)
+      : new Map();
     return rows.map((row) => ({
       ...row,
+      outboundQuantities: outbound.get(row.id),
       receiptLots: byAllocation.get(row.id) || [],
     }));
   }

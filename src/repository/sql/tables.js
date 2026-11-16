@@ -47,6 +47,10 @@ const TABLES = {
   noticeDetailView: `${prefix}v_pur_notice_detail`, // view (read-only)
   in1: `${prefix}pur_in1`,
   in2: `${prefix}pur_in2`,
+  out1: `${prefix}scm_out1`,
+  out2: `${prefix}scm_out2`,
+  outboundLine: `${prefix}whs_outbound_line`,
+  outboundPick: `${prefix}whs_outbound_pick`,
   // ---- Smart Warehouse ----
   userRole: `${prefix}whs_user_role`,
   slots: `${prefix}whs_slots`,

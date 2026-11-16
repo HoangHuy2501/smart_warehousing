@@ -101,6 +101,8 @@ const LOT_SCHEMA = {
     },
     hasWarning: { type: 'boolean', nullable: true },
     qtyInStock: { type: 'number', nullable: true },
+    remainingStockQty: { type: 'number', description: 'Stock after completed outbound picks' },
+    reservedStockQty: { type: 'number', description: 'Stock reserved by open outbound picks' },
     qtyReturn: { type: 'number', nullable: true },
     iqcUpdatedAt: { type: 'string', format: 'date-time', nullable: true },
     statusRecordedAt: { type: 'string', format: 'date-time', nullable: true },
@@ -343,6 +345,27 @@ function buildSwaggerSpec() {
       },
     ],
     paths: {
+      '/api/warehouse/outbound-notifications': {
+        get: {
+          summary: 'Thông báo xuất kho theo phiếu và kệ được phân quyền',
+          responses: { 200: { description: 'Danh sách phiếu, các dòng xuất và lượt lấy trên kệ' } },
+        },
+      },
+      '/api/warehouse/outbound-notifications/{id}/confirm': {
+        post: {
+          summary: 'Xác nhận lấy đúng lượng đã đề xuất trên các kệ được phân quyền',
+          parameters: [{
+            in: 'path', name: 'id', required: true, schema: { type: 'integer' },
+            description: 'ID dòng chi tiết scm_out2',
+          }],
+          responses: {
+            200: { description: 'Trạng thái dòng xuất sau khi ghi xác nhận' },
+            403: ERROR_RESPONSE,
+            404: ERROR_RESPONSE,
+            409: ERROR_RESPONSE,
+          },
+        },
+      },
       '/api/warehouse/auth/login': {
         post: {
           tags: ['Auth'],
