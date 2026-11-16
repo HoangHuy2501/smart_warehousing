@@ -92,6 +92,10 @@ function toApiLot(lot) {
     iqcDecision: opt(lot.iqcDecision),
     hasWarning: opt(lot.hasWarning),
     qtyInStock: opt(lot.qtyInStock),
+    ...(lot.status === 'IN_STOCK' && lot.qtyInStock != null ? {
+      remainingStockQty: Math.max(0, Number(lot.qtyInStock) - Number(lot.outboundQuantities?.shipped_qty || 0)),
+      reservedStockQty: Number(lot.outboundQuantities?.reserved_qty || 0),
+    } : {}),
     qtyReturn: opt(lot.qtyReturn),
     iqcUpdatedAt: opt(lot.iqcUpdatedAt),
     /** Allocation đã rời kệ (closed_at) — FE cần để không tính kệ là đang có hàng */

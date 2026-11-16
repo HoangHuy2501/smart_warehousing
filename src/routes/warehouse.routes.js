@@ -12,6 +12,7 @@
 
 const express = require('express');
 const controller = require('../controller/warehouse.controller');
+const outbound = require('../controller/outbound.controller');
 const { requireBodyFields } = require('../middleware/validate.middleware');
 const { requireAuth, requireManager } = require('../middleware/auth.middleware');
 const { asyncHandler } = require('../util/async-handler');
@@ -39,6 +40,9 @@ router.get('/accounts', requireAuth, asyncHandler(controller.listAccounts));
 router.get('/slots', requireAuth, asyncHandler(controller.listSlots));
 
 router.get('/lots', requireAuth, asyncHandler(controller.listLots));
+
+router.get('/outbound-notifications', requireAuth, asyncHandler(outbound.list));
+router.post('/outbound-notifications/:id/confirm', requireAuth, asyncHandler(outbound.confirm));
 
 router.get('/incoming-pos', requireAuth, asyncHandler(controller.listIncomingPos));
 
