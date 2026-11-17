@@ -23,6 +23,12 @@ function errorHandler(err, req, res, next) {
       error: { code: err.code, message: err.message, timestamp: Date.now() },
     });
   }
+  if (err.code === 'ETIMEOUT') {
+    debug('SQL request timeout:', err);
+    return res.status(504).json({
+      error: { code: 'sql_query_timeout', message: 'sql_query_timeout', timestamp: Date.now() },
+    });
+  }
   debug('Unhandled error:', err);
   return res.status(500).json({
     error: { code: 'INTERNAL_ERROR', message: 'internal_error', timestamp: Date.now() },

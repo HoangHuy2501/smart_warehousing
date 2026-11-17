@@ -18,6 +18,7 @@
 'use strict';
 
 const { resolveDbConfig } = require('./db.config');
+const { executeBatch } = require('../util/api-sql-deadline');
 
 let state = null; // { dialect: 'mssql' | 'pg', pool }
 
@@ -87,7 +88,7 @@ async function query(text, params = []) {
     });
     // .batch() = goi SQL_BATCH truc tiep (session scope) thay vi sp_executesql
     // cua .query() — #temp table (#PO/#Notice/#PurIn) ton tai qua nhieu cau lenh.
-    const result = await request.batch(named);
+    const result = await executeBatch(request, named);
     return { rows: result.recordset || [] };
   }
 
@@ -116,7 +117,7 @@ async function withTransaction(fn) {
         params.forEach((value, i) => {
           request.input(`p${i + 1}`, mssqlInputType(mssql, value), value);
         });
-        const result = await request.batch(named);
+        const result = await executeBatch(request, named);
         return { rows: result.recordset || [] };
       });
       await tx.commit();
