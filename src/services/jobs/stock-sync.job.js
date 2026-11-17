@@ -10,6 +10,7 @@ const BATCH_SIZE = 100;
 let cursor = '';
 
 async function processStockSweep() {
+    const startedAt = Date.now();
     const candidates = await stock.findCandidates(previousMonthCutoff(), cursor, BATCH_SIZE);
     let confirmed = 0;
     let failed = 0;
@@ -22,7 +23,7 @@ async function processStockSweep() {
         }
     }
     cursor = candidates.length === BATCH_SIZE ? candidates.at(-1) : '';
-    const result = { scanned: candidates.length, confirmed, failed };
+    const result = { scanned: candidates.length, confirmed, failed, durationMs: Date.now() - startedAt };
     logger.info('stock_sweep_result', result);
     return result;
 }

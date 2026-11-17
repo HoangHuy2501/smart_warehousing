@@ -15,9 +15,10 @@ async function findCandidates(cutoff, afterId, limit) {
     return rows.map((row) => row.id);
 }
 
-async function findNoticeCoverage(noticeDetailId, tx) {
+async function findNoticeCoverage(noticeIds, tx) {
     const { rows } = await tx(`
         SELECT
+            n.id AS notice_id,
             n.made_lot AS lot_no,
             COALESCE((
                 SELECT SUM(i.sheet_qty)
@@ -48,9 +49,9 @@ async function findNoticeCoverage(noticeDetailId, tx) {
                     OR a.has_warning = ?)
             ) AS unresolved_count
         FROM ${TABLES.notice2} n
-        WHERE n.id = ?
-    `, [true, true, noticeDetailId]);
-    return rows[0] || null;
+        WHERE n.id IN (${noticeIds.map(() => '?').join(', ')})
+    `, [true, true, ...noticeIds]);
+    return rows;
 }
 
 module.exports = { findCandidates, findNoticeCoverage };

@@ -106,7 +106,7 @@ const receiptSyncConcurrency = Number(
 
 /** Cron quét allocation WAITING_IQC đã có lot: mỗi 5 phút (mirror
  *  receipt-sync — IQC T8 push sau khi Receipt Sync xong). */
-const iqcSweepCron = process.env.IQC_SWEEP_CRON || '*/5 * * * *';
+const iqcSweepCron = process.env.IQC_SWEEP_CRON || '4-59/5 * * * *';
 
 /** Job scheduler id cố định — upsert idempotent, restart không nhân bản lịch. */
 const iqcSweepSchedulerId = 'iqc-sync-sweep';

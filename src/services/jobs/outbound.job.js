@@ -9,7 +9,8 @@ const LIMIT = 100;
 
 function createSweep(load, process, getId) {
     let cursor = 0;
-    return async () => {
+    return async (job) => {
+        const startedAt = Date.now();
         const rows = await load(cursor, LIMIT);
         let failed = 0;
         for (const row of rows) {
@@ -21,7 +22,9 @@ function createSweep(load, process, getId) {
             }
         }
         cursor = rows.length === LIMIT ? getId(rows.at(-1)) : 0;
-        return { scanned: rows.length, failed };
+        const result = { scanned: rows.length, failed, durationMs: Date.now() - startedAt };
+        logger.info('outbound_sweep_result', { queue: job?.queueName, ...result });
+        return result;
     };
 }
 
