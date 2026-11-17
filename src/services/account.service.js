@@ -29,6 +29,7 @@
 
 'use strict';
 
+const db = require('../config/db');
 const { err, shared, withTestProfile } = require('./shared');
 const { toApiAccount, toApiSlot } = require('./mappers');
 // @type cho từng require: module.exports repository bị swap theo DB_MODE
@@ -43,10 +44,17 @@ const SlotRepository = require('../repository/sql/slot.repository');
 /** @type {import('../repository/sql/material.repository').MaterialModel} */
 const MaterialRepository = require('../repository/sql/material.repository');
 
+const ACCOUNT_ROLES = new Set(['KEEPER', 'MANAGER', 'IT']);
+
+function validatePassword(password) {
+  if (typeof password !== 'string' || password.trim().length < 6) err('pw_short');
+  if (password.length > 60) err('pw_too_long');
+}
+
 class AccountServices {
   async lookupEmployee(employeeCode, actorId) {
     const actor = await shared.getActor(actorId);
-    if (actor.role !== 'MANAGER') err('no_permission', 403);
+    if (!actor.active || !['MANAGER', 'IT'].includes(actor.role)) err('no_permission', 403);
     const employee = await this.findEmployee(employeeCode);
     const existing = await AccountsRepository.byId(employee.employeeCode);
     return { ...employee, accountExists: Boolean(existing) };
@@ -69,20 +77,32 @@ class AccountServices {
 
   async createAccount(dto) {
     const actor = await shared.getActor(dto.actorId);
-    if (actor.role !== 'MANAGER') err('no_permission', 403);
+    if (!actor.active || !['MANAGER', 'IT'].includes(actor.role)) err('no_permission', 403);
     const employee = await this.findEmployee(dto.employeeCode);
     const existing = await AccountsRepository.byId(employee.employeeCode);
     if (existing) err('code_exists');
 
-    const created = await AccountsRepository.insert({
-      employeeCode: employee.employeeCode,
-      role: 'KEEPER',
-      locked: false,
-      password: '123456',
-      active: true,
+    const role = actor.role === 'IT' ? dto.role : 'KEEPER';
+    if (!ACCOUNT_ROLES.has(role)) err('invalid_account_role');
+    const password = actor.role === 'IT' ? dto.password : '123456';
+    validatePassword(password);
+
+    await db.withTransaction(async (tx) => {
+      const created = await AccountsRepository.insert({
+        employeeCode: employee.employeeCode,
+        role,
+        locked: false,
+        password,
+        active: true,
+      }, tx);
+      if (!created) err('code_exists');
+      await shared.logActivity({
+        userId: actor.id,
+        actionKey: 'ACCOUNT_CREATED',
+        detail: JSON.stringify({ employeeCode: employee.employeeCode, role, actorRole: actor.role }),
+      }, tx);
     });
-    if (!created) err('code_exists');
-    return toApiAccount({ ...employee, id: employee.employeeCode, role: 'KEEPER', locked: false });
+    return toApiAccount({ ...employee, id: employee.employeeCode, role, locked: false });
   }
 
   /**
@@ -176,16 +196,17 @@ class AccountServices {
    */
   async resetAccountPassword(id, dto) {
     const actor = await shared.getActor(dto.actorId);
-    if (actor.role !== 'MANAGER') err('no_permission', 403);
-    if (String(dto.newPassword).length < 6) err('pw_short');
-    const updated = await AccountsRepository.update(id, {
-      password: dto.newPassword,
-    });
-    if (!updated) err('not_found', 404);
-    await shared.logActivity({
-      userId: actor.id,
-      // userName: actor.name,
-      actionKey: 'actResetPw',
+    if (!actor.active || !['MANAGER', 'IT'].includes(actor.role)) err('no_permission', 403);
+    validatePassword(dto.newPassword);
+    await db.withTransaction(async (tx) => {
+      const key = await AccountsRepository.update(id, { password: dto.newPassword }, tx,
+        actor.role === 'MANAGER' ? ['KEEPER', 'MANAGER'] : undefined);
+      if (!key) err('not_found', 404);
+      await shared.logActivity({
+        userId: actor.id,
+        actionKey: 'ACCOUNT_PASSWORD_RESET',
+        detail: JSON.stringify({ employeeCode: key.emp_no, role: key.role, actorRole: actor.role }),
+      }, tx);
     });
   }
 

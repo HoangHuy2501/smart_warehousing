@@ -155,7 +155,7 @@ function buildRawInsert(table, row) {
  * @param {Record<string, string>} columnMap map camelCase -> tên cột DB
  * @returns {{ text: string, values: unknown[] } | null} null nếu patch rỗng
  */
-function buildUpdate(table, patch, whereKey, whereValue, columnMap) {
+function buildUpdate(table, patch, whereKey, whereValue, columnMap, allowedRoles) {
   const keys = Object.keys(patch).filter((key) => columnMap[key] !== undefined);
   if (keys.length === 0) return null;
 
@@ -166,11 +166,12 @@ function buildUpdate(table, patch, whereKey, whereValue, columnMap) {
     }
     return patch[key] === undefined ? null : patch[key];
   });
-  values.push(whereValue);
+  values.push(whereValue, ...(allowedRoles || []));
+  const roleFilter = allowedRoles ? ` AND role IN (${allowedRoles.map(() => '?').join(', ')})` : '';
 
   const text = isPg()
-    ? `UPDATE ${table} SET ${sets.join(', ')} WHERE ${columnMap[whereKey]} = ? RETURNING *`
-    : `UPDATE ${table} SET ${sets.join(', ')} OUTPUT inserted.* WHERE ${columnMap[whereKey]} = ?`;
+    ? `UPDATE ${table} SET ${sets.join(', ')} WHERE ${columnMap[whereKey]} = ?${roleFilter} RETURNING *`
+    : `UPDATE ${table} SET ${sets.join(', ')} OUTPUT inserted.* WHERE ${columnMap[whereKey]} = ?${roleFilter}`;
 
   return { text, values };
 }
@@ -287,11 +288,11 @@ class AccountModel {
    * @param {Record<string, unknown>} account domain object camelCase
    * @returns {Promise<Record<string, unknown> | null>} raw row vừa ghi hoặc null
    */
-  async insert(account) {
+  async insert(account, query = db.query) {
     const insert = buildInsert(TABLES.userRole, account, ACCOUNT_COLUMNS);
     if (!insert) return null;
     try {
-      const { rows } = await db.query(insert.text, insert.values);
+      const { rows } = await query(insert.text, insert.values);
       return rows[0] || null;
     } catch (error) {
       if ([2601, 2627].includes(error.number) || error.code === '23505') return null;
@@ -324,16 +325,17 @@ class AccountModel {
    * @param {Record<string, unknown>} patch các field camelCase cần cập nhật
    * @returns {Promise<Record<string, unknown> | null>} raw row vừa ghi hoặc null nếu không khớp dòng nào
    */
-  async update(empNo, patch) {
+  async update(empNo, patch, query = db.query, allowedRoles) {
     const update = buildUpdate(
       TABLES.userRole,
       patch,
       'employeeCode',
       empNo,
-      ACCOUNT_COLUMNS
+      ACCOUNT_COLUMNS,
+      allowedRoles
     );
     if (!update) return null;
-    const { rows } = await db.query(update.text, update.values);
+    const { rows } = await query(update.text, update.values);
     return rows[0] || null;
   }
 

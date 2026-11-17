@@ -24,6 +24,7 @@ const workerConfig = require('../../config/worker.config');
 const { getWorkerRedisConnection } = require('./redis');
 const { registerShutdownHandler } = require('./graceful-shutdown');
 const { createWorkerLogger } = require('./logger');
+const { startHeartbeat } = require('./heartbeat');
 
 /**
  * Tạo 1 BullMQ Worker có đầy đủ wiring chung.
@@ -81,6 +82,8 @@ function createAppWorker({ workerName, queueName, processor, concurrency }) {
     });
 
     // Đăng ký đầu tiên → shutdown chạy handler này TRƯỚC (thứ tự ngược).
+    const stopHeartbeat = startHeartbeat(queueName);
+    worker.once('closed', stopHeartbeat);
     registerShutdownHandler(`close_worker_${workerName}`, () => worker.close());
 
     return worker;

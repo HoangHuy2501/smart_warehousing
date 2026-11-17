@@ -38,7 +38,7 @@ const ACCOUNT_SCHEMA = {
     name: { type: 'string', example: 'Nguyễn Văn An' },
     employeeCode: { type: 'string', example: 'EMP001' },
     email: { type: 'string', example: 'an.nguyen@germton.com' },
-    role: { type: 'string', enum: ['KEEPER', 'MANAGER'] },
+    role: { type: 'string', enum: ['KEEPER', 'MANAGER', 'IT'] },
     locked: { type: 'boolean' },
   },
 };
@@ -345,6 +345,25 @@ function buildSwaggerSpec() {
       },
     ],
     paths: {
+      '/api/warehouse/it/workers': {
+        get: {
+          tags: ['IT'],
+          summary: 'Tín hiệu worker và thống kê job (IT)',
+          responses: { 200: { description: 'Trạng thái Redis và từng queue' }, 403: ERROR_RESPONSE },
+        },
+      },
+      '/api/warehouse/it/audit': {
+        get: {
+          tags: ['IT'],
+          summary: 'Nhật ký tạo tài khoản và đặt lại mật khẩu (IT)',
+          parameters: [
+            { in: 'query', name: 'page', schema: { type: 'integer', minimum: 1 } },
+            { in: 'query', name: 'pageSize', schema: { type: 'integer', minimum: 1, maximum: 200 } },
+            { in: 'query', name: 'keyword', schema: { type: 'string', maxLength: 90 } },
+          ],
+          responses: { 200: { description: 'Nhật ký phân trang' }, 403: ERROR_RESPONSE },
+        },
+      },
       '/api/warehouse/outbound-notifications': {
         get: {
           summary: 'Thông báo xuất kho theo phiếu và kệ được phân quyền',
@@ -873,7 +892,7 @@ function buildSwaggerSpec() {
         },
         post: {
           tags: ['Accounts'],
-          summary: 'MANAGER tao tai khoan moi',
+          summary: 'Chủ quản tạo Thủ kho, IT tạo tài khoản theo vai trò',
           requestBody: JSON_BODY('#/components/schemas/CreateAccountDto'),
           responses: {
             201: {
@@ -889,7 +908,7 @@ function buildSwaggerSpec() {
       '/api/warehouse/accounts/employee-lookup': {
         get: {
           tags: ['Accounts'],
-          summary: 'Tra cứu nhân viên theo mã NV (MANAGER)',
+          summary: 'Tra cứu nhân viên theo mã NV (MANAGER hoặc IT)',
           parameters: [{
             in: 'query', name: 'employeeCode', required: true,
             schema: { type: 'string', maxLength: 20 },
@@ -1326,6 +1345,9 @@ function buildSwaggerSpec() {
           required: ['employeeCode'],
           properties: {
             employeeCode: { type: 'string', minLength: 1, maxLength: 20, example: 'TK003' },
+            role: { type: 'string', enum: ['KEEPER', 'MANAGER', 'IT'], description: 'Bắt buộc với IT' },
+            password: { type: 'string', format: 'password', minLength: 6, maxLength: 60, writeOnly: true,
+              description: 'Mật khẩu ban đầu bắt buộc với IT' },
           },
         },
         UpdateAccountDto: {

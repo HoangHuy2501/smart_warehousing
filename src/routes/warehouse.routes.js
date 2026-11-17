@@ -13,8 +13,9 @@
 const express = require('express');
 const controller = require('../controller/warehouse.controller');
 const outbound = require('../controller/outbound.controller');
+const itDashboard = require('../controller/it-dashboard.controller');
 const { requireBodyFields } = require('../middleware/validate.middleware');
-const { requireAuth, requireManager } = require('../middleware/auth.middleware');
+const { requireAuth, requireManager, requireAccountAdmin, requireWarehouseOperator, requireIt } = require('../middleware/auth.middleware');
 const { asyncHandler } = require('../util/async-handler');
 const { limitSqlReads } = require('../middleware/sql-load.middleware');
 
@@ -37,13 +38,15 @@ router.get('/auth/me', requireAuth, asyncHandler(controller.me));
 router.get('/', requireAuth, limitSqlReads(controller.bootstrap));
 
 router.get('/accounts', requireAuth, asyncHandler(controller.listAccounts));
+router.get('/it/workers', requireAuth, requireIt, asyncHandler(itDashboard.workers));
+router.get('/it/audit', requireAuth, requireIt, limitSqlReads(itDashboard.audit));
 
 router.get('/slots', requireAuth, asyncHandler(controller.listSlots));
 
 router.get('/lots', requireAuth, limitSqlReads(controller.listLots));
 
 router.get('/outbound-notifications', requireAuth, limitSqlReads(outbound.list));
-router.post('/outbound-notifications/:id/confirm', requireAuth, asyncHandler(outbound.confirm));
+router.post('/outbound-notifications/:id/confirm', requireAuth, requireWarehouseOperator, asyncHandler(outbound.confirm));
 
 router.get('/incoming-pos', requireAuth, limitSqlReads(controller.listIncomingPos));
 
@@ -71,6 +74,7 @@ router.get(
 router.post(
   '/assign',
   requireAuth,
+  requireWarehouseOperator,
   requireBodyFields(['poId', 'slotCode', 'qty']),
   asyncHandler(controller.assignShelf)
 );
@@ -78,6 +82,7 @@ router.post(
 router.post(
   '/lots/:id/iqc',
   requireAuth,
+  requireWarehouseOperator,
   requireBodyFields(['decision']),
   asyncHandler(controller.injectDecision)
 );
@@ -85,6 +90,7 @@ router.post(
 router.post(
   '/lots/:id/move',
   requireAuth,
+  requireWarehouseOperator,
   requireBodyFields(['targetSlotCode', 'qty']),
   asyncHandler(controller.moveLot)
 );
@@ -95,6 +101,7 @@ router.post(
 router.post(
   '/lots/:id/undo',
   requireAuth,
+  requireWarehouseOperator,
   requireBodyFields(['reason']),
   asyncHandler(controller.undoLot)
 );
@@ -123,18 +130,19 @@ router.patch(
 router.post(
   '/activity/qr-print',
   requireAuth,
+  requireWarehouseOperator,
   requireBodyFields(['codes']),
   asyncHandler(controller.logQrPrint)
 );
 
 // ---- TAI KHOAN (whs_user_role) — chi MANAGER (change-password = tu doi) ----
 
-router.get('/accounts/employee-lookup', requireAuth, requireManager, asyncHandler(controller.lookupEmployee));
+router.get('/accounts/employee-lookup', requireAuth, requireAccountAdmin, asyncHandler(controller.lookupEmployee));
 
 router.post(
   '/accounts',
   requireAuth,
-  requireManager,
+  requireAccountAdmin,
   asyncHandler(controller.createAccount)
 );
 
@@ -163,7 +171,7 @@ router.post(
 router.post(
   '/accounts/:id/reset-password',
   requireAuth,
-  requireManager,
+  requireAccountAdmin,
   requireBodyFields(['newPassword']),
   asyncHandler(controller.resetAccountPassword)
 );
