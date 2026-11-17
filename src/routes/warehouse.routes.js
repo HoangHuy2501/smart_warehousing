@@ -16,6 +16,7 @@ const outbound = require('../controller/outbound.controller');
 const { requireBodyFields } = require('../middleware/validate.middleware');
 const { requireAuth, requireManager } = require('../middleware/auth.middleware');
 const { asyncHandler } = require('../util/async-handler');
+const { limitSqlReads } = require('../middleware/sql-load.middleware');
 
 const router = express.Router();
 
@@ -33,22 +34,22 @@ router.get('/auth/me', requireAuth, asyncHandler(controller.me));
 
 // ---- GET THEO DOMAIN (tach bootstrap — du lieu lon, FE tai moi domain rieng) ----
 
-router.get('/', requireAuth, asyncHandler(controller.bootstrap));
+router.get('/', requireAuth, limitSqlReads(controller.bootstrap));
 
 router.get('/accounts', requireAuth, asyncHandler(controller.listAccounts));
 
 router.get('/slots', requireAuth, asyncHandler(controller.listSlots));
 
-router.get('/lots', requireAuth, asyncHandler(controller.listLots));
+router.get('/lots', requireAuth, limitSqlReads(controller.listLots));
 
-router.get('/outbound-notifications', requireAuth, asyncHandler(outbound.list));
+router.get('/outbound-notifications', requireAuth, limitSqlReads(outbound.list));
 router.post('/outbound-notifications/:id/confirm', requireAuth, asyncHandler(outbound.confirm));
 
-router.get('/incoming-pos', requireAuth, asyncHandler(controller.listIncomingPos));
+router.get('/incoming-pos', requireAuth, limitSqlReads(controller.listIncomingPos));
 
 // ---- GET tim kiem (read-only; tham so khong hop le tu ve mac dinh) ----
 
-router.get('/pos', requireAuth, asyncHandler(controller.searchPos));
+router.get('/pos', requireAuth, limitSqlReads(controller.searchPos));
 
 // Tim ma ke theo tu khoa — DOI TU /slots SANG /slots/search (2026-10-16:
 // /slots gio la GET danh sach ke day du; route tinh /slots/search truoc

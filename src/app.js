@@ -13,6 +13,7 @@ const cors = require('cors');
 const swaggerUi = require('swagger-ui-express');
 
 const warehouseRoutes = require('./routes/warehouse.routes');
+const { withApiSqlDeadline } = require('./util/api-sql-deadline');
 const { notFoundHandler, errorHandler } = require('./middleware/error.middleware');
 const { requestLogger, attachErrorStack } = require('./middleware/request-logger.middleware');
 const { buildSwaggerSpec } = require('../docs/swagger.spec');
@@ -30,7 +31,7 @@ app.use(requestLogger);
 app.get('/healthz', function (req, res) {
   res.json({ ok: true });
 });
-app.use('/api/warehouse', warehouseRoutes);
+app.use('/api/warehouse', withApiSqlDeadline, warehouseRoutes);
 
 // Swagger UI — de team test truc tiep tat ca API warehouse tren trinh duyet.
 app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(buildSwaggerSpec()));

@@ -74,20 +74,28 @@ async function insertLine(row, tx) {
 
 async function available(line, tx) {
     const { rows } = await tx(`
-        SELECT r.id AS receipt_id, a.id AS allocation_id, a.slot_code,
-            CAST(r.qty_in_stock - CAST(COALESCE(used.qty, 0) AS DECIMAL(18,8)) AS VARCHAR(40)) AS available_qty
-        FROM ${t.receipt} r
-        JOIN ${t.allocation} a ON a.id = r.allocation_id
-        JOIN ${t.notice2} n ON n.id = r.notice_detail_id
-        JOIN ${t.slots} s ON s.code = a.slot_code
-        LEFT JOIN (
-            SELECT allocation_receipt_id, SUM(COALESCE(picked_qty, planned_qty)) AS qty
-            FROM ${t.outboundPick} GROUP BY allocation_receipt_id
-        ) used ON used.allocation_receipt_id = r.id
-        WHERE a.status = 'IN_STOCK' AND a.closed_at IS NULL AND s.active = ?
-          AND a.goods_no = ? AND r.lot_no = ? AND n.unit_no = ?
-          AND r.qty_in_stock > COALESCE(used.qty, 0)
-        ORDER BY (r.qty_in_stock - CAST(COALESCE(used.qty, 0) AS DECIMAL(18,8))) DESC, a.allocated_at, r.id
+        WITH candidates AS (
+            SELECT r.id AS receipt_id, a.id AS allocation_id, a.slot_code,
+                   r.qty_in_stock, a.allocated_at
+            FROM ${t.receipt} r
+            JOIN ${t.allocation} a ON a.id = r.allocation_id
+            JOIN ${t.notice2} n ON n.id = r.notice_detail_id
+            JOIN ${t.slots} s ON s.code = a.slot_code
+            WHERE a.status = 'IN_STOCK' AND a.closed_at IS NULL AND s.active = ?
+              AND a.goods_no = ? AND r.lot_no = ? AND n.unit_no = ?
+        ), used AS (
+            SELECT p.allocation_receipt_id, SUM(COALESCE(p.picked_qty, p.planned_qty)) AS qty
+            FROM ${t.outboundPick} p
+            JOIN candidates c ON c.receipt_id = p.allocation_receipt_id
+            GROUP BY p.allocation_receipt_id
+        )
+        SELECT c.receipt_id, c.allocation_id, c.slot_code,
+            CAST(c.qty_in_stock - CAST(COALESCE(u.qty, 0) AS DECIMAL(18,8)) AS VARCHAR(40)) AS available_qty
+        FROM candidates c
+        LEFT JOIN used u ON u.allocation_receipt_id = c.receipt_id
+        WHERE c.qty_in_stock > COALESCE(u.qty, 0)
+        ORDER BY (c.qty_in_stock - CAST(COALESCE(u.qty, 0) AS DECIMAL(18,8))) DESC,
+                 c.allocated_at, c.receipt_id
     `, [true, line.goods_no, line.made_lot, line.unit_no]);
     return rows;
 }
