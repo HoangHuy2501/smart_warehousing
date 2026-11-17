@@ -18,9 +18,15 @@ const { bindActor } = require('./bind-actor');
 
 // ---- TAI KHOAN (whs_user_role) ----
 
+const lookupEmployee = async (req, res) => {
+  res.json(await AccountService.lookupEmployee(req.query.employeeCode, req.actor.id));
+};
+
 const createAccount = async (req, res) => {
-  bindActor(req);
-  res.status(201).json(await AccountService.createAccount(req.body));
+  res.status(201).json(await AccountService.createAccount({
+    actorId: req.actor.id,
+    employeeCode: req.body?.employeeCode,
+  }));
 };
 
 const updateAccount = async (req, res) => {
@@ -53,6 +59,7 @@ const keeperDetail = async (req, res) => {
 
 module.exports = {
   createAccount,
+  lookupEmployee,
   updateAccount,
   changePassword,
   toggleAccountLock,

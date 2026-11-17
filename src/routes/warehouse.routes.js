@@ -128,11 +128,12 @@ router.post(
 
 // ---- TAI KHOAN (whs_user_role) — chi MANAGER (change-password = tu doi) ----
 
+router.get('/accounts/employee-lookup', requireAuth, requireManager, asyncHandler(controller.lookupEmployee));
+
 router.post(
   '/accounts',
   requireAuth,
   requireManager,
-  requireBodyFields(['name', 'employeeCode', 'email', 'role']),
   asyncHandler(controller.createAccount)
 );
 

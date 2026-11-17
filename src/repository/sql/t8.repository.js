@@ -646,7 +646,7 @@ class T8Model {
   async findEmpByNo(empNo) {
     const sql = `
     -- DECLARE @empNo NVARCHAR(40) = 'EMP-001';
-    SELECT * FROM bas_emp WHERE emp_no = ?;
+    SELECT emp_no, emp_name FROM bas_emp WHERE emp_no = ?;
   `;
     const params = [empNo];
     guardParams(params);

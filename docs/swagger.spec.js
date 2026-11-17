@@ -886,6 +886,33 @@ function buildSwaggerSpec() {
           },
         },
       },
+      '/api/warehouse/accounts/employee-lookup': {
+        get: {
+          tags: ['Accounts'],
+          summary: 'Tra cứu nhân viên theo mã NV (MANAGER)',
+          parameters: [{
+            in: 'query', name: 'employeeCode', required: true,
+            schema: { type: 'string', maxLength: 20 },
+          }],
+          responses: {
+            200: {
+              description: 'Họ tên từ T8 và tình trạng tài khoản',
+              content: { 'application/json': { schema: {
+                type: 'object',
+                properties: {
+                  employeeCode: { type: 'string' },
+                  name: { type: 'string' },
+                  email: { type: 'string', nullable: true, example: null },
+                  accountExists: { type: 'boolean' },
+                },
+              } } },
+            },
+            400: ERROR_RESPONSE,
+            403: ERROR_RESPONSE,
+            404: ERROR_RESPONSE,
+          },
+        },
+      },
       '/api/warehouse/accounts/{id}': {
         patch: {
           tags: ['Accounts'],
@@ -1296,12 +1323,9 @@ function buildSwaggerSpec() {
         },
         CreateAccountDto: {
           type: 'object',
-          required: ['name', 'employeeCode', 'email', 'role'],
+          required: ['employeeCode'],
           properties: {
-            name: { type: 'string', example: 'Phạm Văn Đức' },
-            employeeCode: { type: 'string', example: 'TK003' },
-            email: { type: 'string', example: 'duc.pham@germton.com' },
-            role: { type: 'string', enum: ['KEEPER', 'MANAGER'] },
+            employeeCode: { type: 'string', minLength: 1, maxLength: 20, example: 'TK003' },
           },
         },
         UpdateAccountDto: {

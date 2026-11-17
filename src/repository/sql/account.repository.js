@@ -186,7 +186,7 @@ class AccountModel {
       r.emp_no AS [id],
       e.emp_name AS [name],
       r.emp_no AS [employeeCode],
-      e.email AS [email],
+      CAST(NULL AS NVARCHAR(255)) AS [email],
       r.role AS [role],
       r.locked AS [locked],
       r.password AS [password],
@@ -218,7 +218,7 @@ class AccountModel {
       r.emp_no AS [id],
       e.emp_name AS [name],
       r.emp_no AS [employeeCode],
-      e.email AS [email],
+      CAST(NULL AS NVARCHAR(255)) AS [email],
       r.role AS [role],
       r.locked AS [locked],
       r.password AS [password],
@@ -237,7 +237,7 @@ class AccountModel {
     SELECT COUNT(*) AS [total]
     FROM (
       SELECT r.emp_no, r.role, r.password, r.locked, r.active,
-             e.emp_name, e.email
+             e.emp_name
       FROM whs_user_role r
       LEFT JOIN bas_emp e ON e.emp_no = r.emp_no
     ) sub
@@ -264,7 +264,7 @@ class AccountModel {
       r.emp_no AS [id],
       e.emp_name AS [name],
       r.emp_no AS [employeeCode],
-      e.email AS [email],
+      CAST(NULL AS NVARCHAR(255)) AS [email],
       r.role AS [role],
       r.locked AS [locked],
       r.password AS [password],
@@ -290,8 +290,13 @@ class AccountModel {
   async insert(account) {
     const insert = buildInsert(TABLES.userRole, account, ACCOUNT_COLUMNS);
     if (!insert) return null;
-    const { rows } = await db.query(insert.text, insert.values);
-    return rows[0] || null;
+    try {
+      const { rows } = await db.query(insert.text, insert.values);
+      return rows[0] || null;
+    } catch (error) {
+      if ([2601, 2627].includes(error.number) || error.code === '23505') return null;
+      throw error;
+    }
   }
 
   /**

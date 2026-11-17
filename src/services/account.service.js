@@ -9,8 +9,7 @@
  *
  * Nghiệp vụ phụ trách (bảng whs_user_role JOIN t8_bas_emp):
  *   1. createAccount        : MANAGER tạo tài khoản mới (mật khẩu mặc định
- *                             123456). Hồ sơ nhân viên (tên/email) do
- *                             T8-simulator tạo trong t8_bas_emp.
+ *                             theo luồng hiện có). Tên lấy từ bas_emp.
  *   2. updateAccount        : MANAGER cập nhật thông tin cá nhân (tên/email
  *                             trên t8_bas_emp, username trên whs_user_role,
  *                             đổi mã nhân sự → rename tham chiếu).
@@ -45,48 +44,45 @@ const SlotRepository = require('../repository/sql/slot.repository');
 const MaterialRepository = require('../repository/sql/material.repository');
 
 class AccountServices {
-  /**
-   * Tạo tài khoản mới — chỉ MANAGER.
-   * @param {object} dto - { actorId, employeeCode, role, ... }
-   * @returns {Promise<object>} Tài khoản vừa tạo (shape IAccount, đã ẩn mật khẩu)
-   * @throws {ApiError} no_permission (403) / code_exists / not_found (404)
-   */
+  async lookupEmployee(employeeCode, actorId) {
+    const actor = await shared.getActor(actorId);
+    if (actor.role !== 'MANAGER') err('no_permission', 403);
+    const employee = await this.findEmployee(employeeCode);
+    const existing = await AccountsRepository.byId(employee.employeeCode);
+    return { ...employee, accountExists: Boolean(existing) };
+  }
+
+  async findEmployee(value) {
+    if (typeof value !== 'string' || /[\x00-\x1f\x7f]/.test(value)) {
+      err('invalid_employee_code');
+    }
+    const employeeCode = value.trim();
+    if (!employeeCode || employeeCode.length > 20 || /\s/.test(employeeCode)) {
+      err('invalid_employee_code');
+    }
+    const employee = await T8Repository.findEmpByNo(employeeCode);
+    if (!employee) err('not_found', 404);
+    const name = employee.emp_name?.trim();
+    if (!name) err('employee_name_missing');
+    return { employeeCode: employee.emp_no.trim(), name, email: null };
+  }
+
   async createAccount(dto) {
     const actor = await shared.getActor(dto.actorId);
     if (actor.role !== 'MANAGER') err('no_permission', 403);
-    const existing = await AccountsRepository.byId(dto.employeeCode);
+    const employee = await this.findEmployee(dto.employeeCode);
+    const existing = await AccountsRepository.byId(employee.employeeCode);
     if (existing) err('code_exists');
 
-    // Ghi t8_* ĐANG TẮT (2026-10-16, user chọn giữ tắt + báo lỗi rõ):
-    // hồ sơ nhân viên phải có SẴN trong t8_bas_emp (T8 là nguồn sự
-    // thật). Nếu mã nhân sự chưa tồn tại thì báo not_found — không tự
-    // tạo hồ sơ mới; tên/email lấy từ JOIN t8_bas_emp, bỏ qua name/email
-    // FE truyền vào.
-    // => TẠM TẮT (2026-10-16, user: dữ liệu thật chưa có t8_bas_emp,
-    // chỉ comment không xóa — bật lại khi dữ liệu thật đã có hồ sơ
-    // nhân viên):
-    // const empProfile = await repo.t8.findEmpByNo(dto.employeeCode);
-    // if (!empProfile) err('not_found', 404);
-    await AccountsRepository.insert({
-      employeeCode: dto.employeeCode,
-      // username: dto.username,
-      role: dto.role,
+    const created = await AccountsRepository.insert({
+      employeeCode: employee.employeeCode,
+      role: 'KEEPER',
       locked: false,
-      password: '123456', // sau nhớ truyền biến vào (ko để mặc định)
+      password: '123456',
       active: true,
     });
-    // Đọc lại để lấy tên/email từ JOIN t8_bas_emp; fallback hồ sơ test
-    // là quy tắc nghiệp vụ demo nên áp tại service (không nằm repo).
-    const created = withTestProfile(
-      await AccountsRepository.byId(dto.employeeCode)
-    );
-    await shared.logActivity({
-      userId: actor.id,
-      // userName: actor.name,
-      actionKey: 'actCreateAccount',
-      detail: dto.name,
-    });
-    return toApiAccount(created);
+    if (!created) err('code_exists');
+    return toApiAccount({ ...employee, id: employee.employeeCode, role: 'KEEPER', locked: false });
   }
 
   /**
