@@ -850,6 +850,7 @@ function makeMemoryRepository() {
         return mapAccountRow(role, emp ? emp.emp_name : null, emp ? emp.email : null);
       },
       async insert(account) {
+        if (data.userRoles.some((role) => role.emp_no === account.employeeCode)) return null;
         const row = {
           emp_no: account.employeeCode,
           role: account.role,
@@ -2231,6 +2232,10 @@ function makeMemoryRepository() {
     // T8 (mock Germton T8 — T8-simulator là layer duy nhất được ghi)
     // ================================================================
     t8: {
+      async findEmpByNo(empNo) {
+        const employee = findEmp(empNo);
+        return employee ? { emp_no: employee.emp_no, emp_name: employee.emp_name } : null;
+      },
       async deleteAllEmps() {
         data.emps = [];
       },
