@@ -29,4 +29,23 @@ function requireManager(req, res, next) {
   return next();
 }
 
-module.exports = { requireAuth, requireManager };
+function requireIt(req, res, next) {
+  if (req.actor?.role !== 'IT') return next(new ApiError('no_permission', 403, 'no_permission'));
+  return next();
+}
+
+function requireAccountAdmin(req, res, next) {
+  if (!['MANAGER', 'IT'].includes(req.actor?.role)) {
+    return next(new ApiError('no_permission', 403, 'no_permission'));
+  }
+  return next();
+}
+
+function requireWarehouseOperator(req, res, next) {
+  if (!['MANAGER', 'KEEPER'].includes(req.actor?.role)) {
+    return next(new ApiError('no_permission', 403, 'no_permission'));
+  }
+  return next();
+}
+
+module.exports = { requireAuth, requireManager, requireAccountAdmin, requireWarehouseOperator, requireIt };

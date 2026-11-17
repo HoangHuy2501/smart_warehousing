@@ -1,5 +1,7 @@
 'use strict';
 
+const { ACCOUNT_AUDIT_ACTIONS } = require('../../config/account-audit');
+
 /**
  * Repository bảng whs_activity (nhật ký hoạt động).
  *
@@ -179,9 +181,10 @@ class ActivityModel {
       a.detail AS [detail],
       'mock' AS [source]
     FROM whs_activity a
+    WHERE a.action_key NOT IN (${ACCOUNT_AUDIT_ACTIONS.map(() => '?').join(', ')})
     ORDER BY a.acted_at DESC
   `;
-    const params = [];
+    const params = ACCOUNT_AUDIT_ACTIONS;
     guardParams(params);
     const { rows } = await db.query(toDialect(sql), params);
     return limit > 0 ? rows.slice(0, limit) : rows;
@@ -335,6 +338,9 @@ class ActivityModel {
     const keywordPattern = kw ? `%${kw}%` : null;
     const actionKey = String(opts.actionKey || '').trim() || null;
     const offset = (opts.page - 1) * opts.pageSize;
+    const actionKeys = opts.actionKeys ?? ACCOUNT_AUDIT_ACTIONS;
+    const actionFilter = `AND a.action_key ${opts.actionKeys ? 'IN' : 'NOT IN'}
+      (${actionKeys.map(() => '?').join(', ')})`;
     const sql = `
     -- DECLARE @keywordPattern NVARCHAR(100) = NULL;
     -- DECLARE @actionKey NVARCHAR(40) = NULL;
@@ -368,6 +374,7 @@ class ActivityModel {
       CAST(? AS NVARCHAR(40)) IS NULL
       OR a.action_key = ?
     )
+    ${actionFilter}
     ORDER BY a.acted_at DESC, a.id DESC
     OFFSET ? ROWS FETCH NEXT ? ROWS ONLY
   `;
@@ -381,6 +388,7 @@ class ActivityModel {
       keywordPattern,
       actionKey,
       actionKey,
+      ...actionKeys,
       offset,
       opts.pageSize,
     ];
@@ -404,6 +412,7 @@ class ActivityModel {
       CAST(? AS NVARCHAR(40)) IS NULL
       OR a.action_key = ?
     )
+    ${actionFilter}
   `;
     const countParams = [
       keywordPattern,
@@ -415,6 +424,7 @@ class ActivityModel {
       keywordPattern,
       actionKey,
       actionKey,
+      ...actionKeys,
     ];
     guardParams(countParams);
     const counted = await db.query(toDialect(countSql), countParams);

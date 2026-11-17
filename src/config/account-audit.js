@@ -1,0 +1,5 @@
+'use strict';
+
+const ACCOUNT_AUDIT_ACTIONS = ['ACCOUNT_CREATED', 'ACCOUNT_PASSWORD_RESET'];
+
+module.exports = { ACCOUNT_AUDIT_ACTIONS };

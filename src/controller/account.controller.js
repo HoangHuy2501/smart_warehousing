@@ -26,6 +26,8 @@ const createAccount = async (req, res) => {
   res.status(201).json(await AccountService.createAccount({
     actorId: req.actor.id,
     employeeCode: req.body?.employeeCode,
+    role: req.body?.role,
+    password: req.body?.password,
   }));
 };
 

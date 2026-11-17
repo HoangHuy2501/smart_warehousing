@@ -27,6 +27,8 @@
 
 'use strict';
 
+const { ACCOUNT_AUDIT_ACTIONS } = require('../config/account-audit');
+
 const { previousMonthCutoff } = require('../util/month-cutoff');
 const { buildSeed } = require('../config/seed-data');
 const { TEST_ACCOUNTS } = require('../config/test-accounts');
@@ -867,16 +869,16 @@ function makeMemoryRepository() {
         data.userRoles.push(clone(row));
         return row;
       },
-      async update(empNo, patch) {
+      async update(empNo, patch, query, allowedRoles) {
         const role = data.userRoles.find((r) => r.emp_no === empNo);
-        if (!role) return null;
+        if (!role || (allowedRoles && !allowedRoles.includes(role.role))) return null;
         if (patch.username !== undefined) role.username = patch.username;
         if (patch.role !== undefined) role.role = patch.role;
         if (patch.locked !== undefined) role.locked = patch.locked;
         if (patch.password !== undefined) role.password = patch.password;
         if (patch.active !== undefined) role.active = patch.active;
         const emp = findEmp(empNo);
-        return mapAccountRow(role, emp ? emp.emp_name : null, emp ? emp.email : null);
+        return { ...mapAccountRow(role, emp ? emp.emp_name : null, emp ? emp.email : null), emp_no: role.emp_no };
       },
       async renameEmpNo(oldEmpNo, newEmpNo) {
         for (const role of data.userRoles) {
@@ -2147,7 +2149,7 @@ function makeMemoryRepository() {
     // ================================================================
     activity: {
       async list(limit = 50) {
-        const mapped = [...data.activity]
+        const mapped = data.activity.filter((row) => !ACCOUNT_AUDIT_ACTIONS.includes(row.action_key))
           .sort((a, b) =>
             String(b.acted_at).localeCompare(String(a.acted_at))
           )
@@ -2177,6 +2179,9 @@ function makeMemoryRepository() {
         if (opts.actionKey) {
           rows = rows.filter((a) => a.action_key === opts.actionKey);
         }
+        rows = opts.actionKeys
+          ? rows.filter((a) => opts.actionKeys.includes(a.action_key))
+          : rows.filter((a) => !ACCOUNT_AUDIT_ACTIONS.includes(a.action_key));
         rows.sort(
           (a, b) =>
             String(b.acted_at).localeCompare(String(a.acted_at)) ||
