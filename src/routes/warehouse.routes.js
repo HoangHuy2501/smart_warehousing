@@ -13,6 +13,7 @@
 const express = require('express');
 const controller = require('../controller/warehouse.controller');
 const outbound = require('../controller/outbound.controller');
+const pushDevices = require('../controller/push-device.controller');
 const itDashboard = require('../controller/it-dashboard.controller');
 const { requireBodyFields } = require('../middleware/validate.middleware');
 const { requireAuth, requireManager, requireAccountAdmin, requireWarehouseOperator, requireIt } = require('../middleware/auth.middleware');
@@ -44,6 +45,10 @@ router.get('/it/audit', requireAuth, requireIt, limitSqlReads(itDashboard.audit)
 router.get('/slots', requireAuth, asyncHandler(controller.listSlots));
 
 router.get('/lots', requireAuth, limitSqlReads(controller.listLots));
+
+router.get('/push-devices/config', requireAuth, requireWarehouseOperator, asyncHandler(pushDevices.config));
+router.post('/push-devices', requireAuth, requireWarehouseOperator, asyncHandler(pushDevices.register));
+router.delete('/push-devices', requireAuth, requireWarehouseOperator, asyncHandler(pushDevices.unregister));
 
 router.get('/outbound-notifications/revision', requireAuth, requireWarehouseOperator, asyncHandler(outbound.revision));
 router.get('/outbound-notifications', requireAuth, requireWarehouseOperator, limitSqlReads(outbound.list));

@@ -4,20 +4,25 @@ const repo = require('../../repository/sql/outbound.repository');
 const service = require('../outbound.service');
 const { createWorkerLogger } = require('../../util/worker/logger');
 const { publishOutboundRevision } = require('../../util/worker/outbound-revision');
+const { enqueueOutboundPush } = require('./outbound-push.job');
 
 const logger = createWorkerLogger('outbound-job');
 const LIMIT = 100;
 
-function createSweep(load, process, getId) {
+function createSweep(load, process, getId, discovery = false) {
     let cursor = 0;
     return async (job) => {
         const startedAt = Date.now();
         const rows = await load(cursor, LIMIT);
         let failed = 0;
         let changed = 0;
+        const changedSheets = new Set();
         for (const row of rows) {
             try {
-                if (await process(row)) changed += 1;
+                if (await process(row)) {
+                    changed += 1;
+                    if (discovery) changedSheets.add(row.sheet_no);
+                }
             } catch (error) {
                 failed += 1;
                 logger.error('outbound_line_failed', { id: getId(row), message: error.message });
@@ -27,14 +32,23 @@ function createSweep(load, process, getId) {
         if (changed && !await publishOutboundRevision()) {
             logger.warn('outbound_revision_unavailable', { queue: job?.queueName });
         }
-        const result = { scanned: rows.length, changed, failed, durationMs: Date.now() - startedAt };
+        let pushEnqueueFailed = 0;
+        for (const sheetNo of changedSheets) {
+            try {
+                await enqueueOutboundPush(sheetNo);
+            } catch {
+                pushEnqueueFailed += 1;
+                logger.error('outbound_push_enqueue_failed', { sheetNo });
+            }
+        }
+        const result = { scanned: rows.length, changed, failed, pushEnqueueFailed, durationMs: Date.now() - startedAt };
         logger.info('outbound_sweep_result', { queue: job?.queueName, ...result });
         return result;
     };
 }
 
 function createDiscoverySweep(since) {
-    return createSweep((after, limit) => repo.discover(since, after, limit), service.plan, (row) => row.id);
+    return createSweep((after, limit) => repo.discover(since, after, limit), service.plan, (row) => row.id, true);
 }
 
 const processCompletionSweep = createSweep(repo.ready, service.complete, (id) => id);

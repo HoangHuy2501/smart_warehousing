@@ -364,6 +364,26 @@ function buildSwaggerSpec() {
           responses: { 200: { description: 'Nhật ký phân trang' }, 403: ERROR_RESPONSE },
         },
       },
+      '/api/warehouse/push-devices/config': {
+        get: {
+          summary: 'Lấy khóa công khai VAPID cho thiết bị',
+          responses: {
+            200: { description: 'vapidPublicKey' },
+            403: ERROR_RESPONSE,
+            503: ERROR_RESPONSE,
+          },
+        },
+      },
+      '/api/warehouse/push-devices': {
+        post: {
+          summary: 'Đăng ký Web Push cho tài khoản đã xác thực',
+          responses: { 200: { description: 'Đã đăng ký' }, 400: ERROR_RESPONSE, 403: ERROR_RESPONSE },
+        },
+        delete: {
+          summary: 'Hủy Web Push theo endpoint của tài khoản đã xác thực',
+          responses: { 200: { description: 'Đã hủy đăng ký' }, 400: ERROR_RESPONSE, 403: ERROR_RESPONSE },
+        },
+      },
       '/api/warehouse/outbound-notifications/revision': {
         get: {
           summary: 'Phiên bản dữ liệu thông báo xuất kho',

@@ -1,7 +1,7 @@
 'use strict';
 
 const db = require('../../config/db');
-const { TABLES: t } = require('./tables');
+const { TABLES: t, outboundRecipientPredicate } = require('./tables');
 
 const source = `
     SELECT d.id, d.sheet_no, d.goods_no, d.made_lot, d.unit_no,
@@ -159,17 +159,11 @@ async function closeEmptyAllocation(id, now, tx) {
           AND qty_in_stock = 0 AND COALESCE(qty_return, 0) = 0`, [now, id]);
 }
 
-async function listNotifications(actor) {
-    const scope = actor.role === 'MANAGER' ? '' : `
-        AND (
-            s.keeper_emp_no = ?
-            OR EXISTS (
-                SELECT 1 FROM ${t.keeperMaterialAssignment} ma
-                WHERE ma.goods_no = l.goods_no AND ma.keeper_emp_no = ?
-                  AND ma.ended_at IS NULL
-            )
-        )
-    `;
+async function listNotifications(actor, sheetNo) {
+    const scope = actor.role === 'MANAGER' ? '' : `AND ${outboundRecipientPredicate('?')}`;
+    const sheetFilter = sheetNo ? 'AND l.sheet_no = ?' : '';
+    const params = actor.role === 'MANAGER' ? [] : [actor.id, actor.id];
+    if (sheetNo) params.push(sheetNo);
     const { rows } = await db.query(`
         SELECT l.scm_out_detail_id, l.sheet_no, l.goods_no, l.made_lot,
                l.unit_no, l.requested_qty, l.status, l.created_at,
@@ -193,9 +187,9 @@ async function listNotifications(actor) {
             SELECT allocation_receipt_id, SUM(COALESCE(picked_qty, planned_qty)) AS used_qty
             FROM ${t.outboundPick} GROUP BY allocation_receipt_id
         ) used ON used.allocation_receipt_id = r.id
-        WHERE l.completed_at IS NULL ${scope}
+        WHERE l.completed_at IS NULL ${scope} ${sheetFilter}
         ORDER BY l.created_at DESC, l.scm_out_detail_id, p.id
-    `, actor.role === 'MANAGER' ? [] : [actor.id, actor.id]);
+    `, params);
     return rows;
 }
 

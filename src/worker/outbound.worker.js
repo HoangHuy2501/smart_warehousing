@@ -11,6 +11,9 @@ const { registerShutdownHandler } = require('../util/worker/graceful-shutdown');
 const { createWorkerLogger } = require('../util/worker/logger');
 const { createDiscoverySweep, processCompletionSweep } = require('../services/jobs/outbound.job');
 
+const { QUEUE_NAME: pushQueue, processOutboundPush } = require('../services/jobs/outbound-push.job');
+const { vapidConfig } = require('../services/push-device.service');
+
 const logger = createWorkerLogger('outbound-worker');
 
 async function startWorker(name, pattern, processor) {
@@ -38,6 +41,9 @@ async function main() {
     registerShutdownHandler('close_queue', closeQueues);
     await startWorker('outbound-discovery', '1-59/5 * * * *', createDiscoverySweep(date));
     await startWorker('outbound-completion', '3-59/5 * * * *', processCompletionSweep);
+    if (vapidConfig()) {
+        createAppWorker({ workerName: pushQueue, queueName: pushQueue, processor: processOutboundPush, concurrency: 1 });
+    }
 }
 
 main().catch((error) => {

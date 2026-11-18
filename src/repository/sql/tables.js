@@ -53,6 +53,7 @@ const TABLES = {
   outboundLine: `${prefix}whs_outbound_line`,
   outboundPick: `${prefix}whs_outbound_pick`,
   // ---- Smart Warehouse ----
+  pushSubscription: `${prefix}whs_push_subscription`,
   userRole: `${prefix}whs_user_role`,
   slots: `${prefix}whs_slots`,
   allocation: `${prefix}whs_slot_allocation`,
@@ -63,4 +64,16 @@ const TABLES = {
   reconcileIssue: `${prefix}whs_reconcile_issue`,
 };
 
-module.exports = { TABLES };
+function outboundRecipientPredicate(employeeSql, roleSql) {
+  return `(
+    ${roleSql ? `${roleSql} = 'MANAGER' OR` : ''}
+    s.keeper_emp_no = ${employeeSql}
+    OR EXISTS (
+      SELECT 1 FROM ${TABLES.keeperMaterialAssignment} ma
+      WHERE ma.goods_no = l.goods_no AND ma.keeper_emp_no = ${employeeSql}
+        AND ma.ended_at IS NULL
+    )
+  )`;
+}
+
+module.exports = { TABLES, outboundRecipientPredicate };

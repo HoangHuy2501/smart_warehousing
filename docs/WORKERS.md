@@ -201,3 +201,17 @@ Endpoint IQC thủ công trả 403 trong `DB_MODE=sqlserver`.
 
 Chạy bộ kiểm thử với PostgreSQL sandbox đã có fixture schema bằng
 `DB_MODE=test-postgres node test/iqc-sync.test.js`.
+
+## Web Push xuất kho
+
+Chạy `npx web-push generate-vapid-keys` một lần. Đặt `VAPID_PUBLIC_KEY`,
+`VAPID_PRIVATE_KEY` và `VAPID_SUBJECT` (ví dụ `mailto:it@example.com`)
+trong môi trường dùng chung của API và `outbound-worker`. Giữ khóa riêng
+ngoài Git. Bảng `dbo.whs_push_subscription` phải được tạo trước khi bật tính năng.
+Khởi động lại API và worker sau khi nạp cấu hình.
+
+- `GET /api/warehouse/push-devices/config` trả `{ vapidPublicKey }`.
+- `POST /api/warehouse/push-devices` nhận `{ subscription: { endpoint, keys: { p256dh, auth } }, platform }`.
+- `DELETE /api/warehouse/push-devices` nhận `{ endpoint }`. Hủy đăng ký từ FE trước khi đăng xuất trên thiết bị dùng chung.
+- Notification payload gồm `title`, `body`, `tag`, `sheetNo`, `url` và `data` chứa `sheetNo`, `url`. URL mở phiếu là `/outbound?sheet=...`.
+- Sau khi lưu thay đổi phiếu, worker đưa việc gửi vào queue `outbound-push`. Lỗi gửi được retry qua BullMQ. Redis lưu dấu gửi theo tài khoản, thiết bị và phiếu trong 30 ngày. Nếu Redis lỗi đúng lúc enqueue sau khi SQL đã commit, thông báo trong app vẫn còn và log ghi `outbound_push_enqueue_failed`.
