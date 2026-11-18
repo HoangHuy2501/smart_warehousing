@@ -80,7 +80,10 @@ async function confirm(id, actor) {
         if (!scoped.length) err('no_permission', 403);
         if (line.status !== 'WAITING_PICK') return { status: line.status };
         const pending = scoped.filter((pick) => pick.picked_at == null);
-        for (const allocationId of [...new Set(pending.map((pick) => pick.allocation_id))].sort()) {
+        if (!pending.length) return { status: line.status };
+        if (!sameSource(await repo.findSource(id, tx), line)) err('outbound_shelf_changed', 409);
+        const allocationIds = [...new Set(pending.map((pick) => pick.allocation_id))].sort();
+        for (const allocationId of allocationIds) {
             await acquireAllocationLock(allocationId, tx);
         }
         const now = new Date();
@@ -88,12 +91,16 @@ async function confirm(id, actor) {
             pending.some((old) => old.id === item.id))) {
             if (!sameShelf(pick, line)) err('outbound_shelf_changed', 409);
             if (!shared.canAccessSlot(actor, { keeperId: pick.keeper_emp_no })) err('no_permission', 403);
+            if (!await repo.debitAllocationStock(pick.allocation_id, pick.planned, tx)) {
+                err('outbound_shelf_changed', 409);
+            }
             await repo.confirmPick(pick.id, actor.id, now, tx);
         }
+        for (const allocationId of allocationIds) await repo.closeEmptyAllocation(allocationId, now, tx);
         const confirmed = (await repo.picks(id, tx)).reduce((sum, pick) => sum + amount(pick.picked), 0n);
         const status = confirmed === amount(line.qty) ? 'PICKED' : 'WAITING_PICK';
         await repo.setStatus(id, status, null, tx);
-        return { status };
+        return { status, changed: true };
     });
 }
 
@@ -107,12 +114,9 @@ async function complete(id) {
             return false;
         }
 
-        const picks = await repo.picks(id, tx);
-        const allocationIds = [...new Set(picks.map((pick) => pick.allocation_id))].sort();
-        for (const allocationId of allocationIds) await acquireAllocationLock(allocationId, tx);
         const current = await repo.picks(id, tx);
         const total = current.reduce((sum, pick) => sum + amount(pick.picked), 0n);
-        if (total !== amount(line.qty) || current.some((pick) => !pick.picked_at || !sameShelf(pick, line))) {
+        if (total !== amount(line.qty) || current.some((pick) => !pick.picked_at || !pick.picked_by_emp_no)) {
             return false;
         }
 
@@ -131,7 +135,6 @@ async function complete(id) {
                     madeLot: line.made_lot, sourceDetailId: id }),
             }, tx);
         }
-        for (const allocationId of allocationIds) await repo.closeEmptyAllocation(allocationId, now, tx);
         return true;
     });
 }

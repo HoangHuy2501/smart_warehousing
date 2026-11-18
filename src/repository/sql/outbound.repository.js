@@ -139,18 +139,24 @@ async function setStatus(id, status, completedAt, tx) {
         WHERE scm_out_detail_id = ?`, [status, completedAt, id]);
 }
 
+async function debitAllocationStock(id, qty, tx) {
+    const output = db.getDialect() === 'pg' ? '' : 'OUTPUT inserted.id';
+    const returning = db.getDialect() === 'pg' ? 'RETURNING id' : '';
+    const { rows } = await tx(`
+        UPDATE ${t.allocation}
+        SET qty_in_stock = qty_in_stock - CAST(? AS DECIMAL(18,8))
+        ${output}
+        WHERE id = ? AND status = 'IN_STOCK' AND closed_at IS NULL
+          AND qty_in_stock >= CAST(? AS DECIMAL(18,8))
+        ${returning}
+    `, [qty, id, qty]);
+    return rows.length === 1;
+}
+
 async function closeEmptyAllocation(id, now, tx) {
     await tx(`UPDATE ${t.allocation} SET closed_at = ?
         WHERE id = ? AND status = 'IN_STOCK' AND closed_at IS NULL
-          AND COALESCE(qty_return, 0) = 0
-          AND NOT EXISTS (
-              SELECT 1 FROM ${t.receipt} r WHERE r.allocation_id = ?
-                AND COALESCE(r.qty_in_stock, 0) > COALESCE((
-                    SELECT SUM(p.picked_qty) FROM ${t.outboundPick} p
-                    JOIN ${t.outboundLine} l ON l.scm_out_detail_id = p.scm_out_detail_id
-                    WHERE p.allocation_receipt_id = r.id AND l.status = 'COMPLETED'
-                ), 0)
-          )`, [now, id, id]);
+          AND qty_in_stock = 0 AND COALESCE(qty_return, 0) = 0`, [now, id]);
 }
 
 async function listNotifications(actor) {
@@ -173,7 +179,7 @@ async function listNotifications(actor) {
             SELECT allocation_receipt_id, SUM(COALESCE(picked_qty, planned_qty)) AS used_qty
             FROM ${t.outboundPick} GROUP BY allocation_receipt_id
         ) used ON used.allocation_receipt_id = r.id
-        WHERE l.status <> 'COMPLETED' ${scope}
+        WHERE l.completed_at IS NULL ${scope}
         ORDER BY l.created_at DESC, l.scm_out_detail_id, p.id
     `, actor.role === 'MANAGER' ? [] : [actor.id]);
     return rows;
@@ -185,12 +191,11 @@ async function quantitiesByAllocation(ids) {
         const chunk = ids.slice(offset, offset + 500);
         const { rows } = await db.query(`
             SELECT p.allocation_id,
-                SUM(CASE WHEN l.status = 'COMPLETED' THEN p.picked_qty ELSE 0 END) AS shipped_qty,
-                SUM(CASE WHEN l.status <> 'COMPLETED' THEN COALESCE(p.picked_qty, p.planned_qty)
-                         ELSE 0 END) AS reserved_qty
+                SUM(p.planned_qty) AS reserved_qty
             FROM ${t.outboundPick} p
             JOIN ${t.outboundLine} l ON l.scm_out_detail_id = p.scm_out_detail_id
-            WHERE p.allocation_id IN (${chunk.map(() => '?').join(', ')})
+            WHERE l.completed_at IS NULL AND p.picked_at IS NULL
+              AND p.allocation_id IN (${chunk.map(() => '?').join(', ')})
             GROUP BY p.allocation_id
         `, chunk);
         for (const row of rows) result.set(row.allocation_id, row);
@@ -200,5 +205,5 @@ async function quantitiesByAllocation(ids) {
 
 module.exports = {
     discover, ready, lock, findSource, findLine, insertLine, available, insertPick,
-    picks, confirmPick, setStatus, closeEmptyAllocation, listNotifications, quantitiesByAllocation,
+    picks, confirmPick, setStatus, debitAllocationStock, closeEmptyAllocation, listNotifications, quantitiesByAllocation,
 };

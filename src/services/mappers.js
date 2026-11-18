@@ -93,7 +93,7 @@ function toApiLot(lot) {
     hasWarning: opt(lot.hasWarning),
     qtyInStock: opt(lot.qtyInStock),
     ...(lot.status === 'IN_STOCK' && lot.qtyInStock != null ? {
-      remainingStockQty: Math.max(0, Number(lot.qtyInStock) - Number(lot.outboundQuantities?.shipped_qty || 0)),
+      remainingStockQty: Number(lot.qtyInStock),
       reservedStockQty: Number(lot.outboundQuantities?.reserved_qty || 0),
     } : {}),
     qtyReturn: opt(lot.qtyReturn),
