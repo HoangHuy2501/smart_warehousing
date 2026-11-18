@@ -692,6 +692,7 @@ function buildSwaggerSpec() {
         post: {
           tags: ['Lots'],
           summary: 'Chuyen lo hang sang ke khac (toan bo hoac mot phan)',
+          description: 'Chuyển nguyên lô giữ ID và trạng thái. Chuyển một phần tạo lô cùng trạng thái; cần xác định phần hàng nếu lô trộn nhiều phiếu hoặc có cả lượng nhận và trả.',
           parameters: [
             {
               name: 'id',
@@ -710,6 +711,7 @@ function buildSwaggerSpec() {
             400: ERROR_RESPONSE,
             403: ERROR_RESPONSE,
             404: ERROR_RESPONSE,
+            409: ERROR_RESPONSE,
           },
         },
       },
