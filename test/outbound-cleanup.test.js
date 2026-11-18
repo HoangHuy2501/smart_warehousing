@@ -10,22 +10,19 @@ test('checks T8 again under the outbound lock before deleting a waiting line', a
     const tx = () => assert.fail('repository methods should receive the transaction');
     const lock = t.mock.method(repo, 'lock', async (transaction) => assert.equal(transaction, tx));
     t.mock.method(db, 'withTransaction', async (callback) => callback(tx));
-    const line = { status: 'WAITING_PICK' };
-    t.mock.method(repo, 'findLine', async () => {
+    let eligible = false;
+    t.mock.method(repo, 'isMissingWaitingLine', async (id, transaction) => {
+        assert.equal(id, 42);
+        assert.equal(transaction, tx);
         assert.ok(lock.mock.callCount() > 0);
-        return line;
+        return eligible;
     });
-    let source = { id: 42, rem: 'Rem changed in T8' };
-    t.mock.method(repo, 'findSource', async () => source);
-    const remove = t.mock.method(repo, 'deleteLineAndPicks', async () => {});
+    const remove = t.mock.method(repo, 'deleteLine', async () => {});
 
-    assert.equal(await removeDeletedWaitingLine(42), false);
-    source = null;
-    line.status = 'PICKED';
     assert.equal(await removeDeletedWaitingLine(42), false);
     assert.equal(remove.mock.callCount(), 0);
 
-    line.status = 'WAITING_PICK';
+    eligible = true;
     assert.equal(await removeDeletedWaitingLine(42), true);
     assert.deepEqual(remove.mock.calls.map(({ arguments: args }) => args), [[42, tx]]);
 });

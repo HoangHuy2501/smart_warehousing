@@ -137,10 +137,9 @@ async function confirm(id, actor) {
 async function removeDeletedWaitingLine(id) {
     return db.withTransaction(async (tx) => {
         await repo.lock(tx);
-        const line = await repo.findLine(id, tx);
-        if (line?.status !== 'WAITING_PICK' || await repo.findSource(id, tx)) return false;
+        if (!await repo.isMissingWaitingLine(id, tx)) return false;
 
-        await repo.deleteLineAndPicks(id, tx);
+        await repo.deleteLine(id, tx);
         return true;
     });
 }
