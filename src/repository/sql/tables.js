@@ -39,6 +39,7 @@ const prefix = resolveTablePrefix();
 const TABLES = {
   // ---- T8 mock (mock Germton T8 ERP) ----
   emps: `${prefix}bas_emp`,
+  userPass: `${prefix}sys_userpass`,
   goods: `${prefix}bas_goods`,
   order1: `${prefix}pur_order1`,
   order2: `${prefix}pur_order2`,

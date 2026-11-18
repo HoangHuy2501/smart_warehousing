@@ -117,6 +117,15 @@ const SEED_MATERIAL_ASSIGNMENTS = [
   },
 ];
 
+// Tài khoản T8 mẫu dùng riêng cho bộ lọc người tạo PO.
+const PO_CREATOR_USERS = new Map([
+  ['EMP001', 'Nguyễn Văn An'],
+  ['EMP002', 'Trần Thị Bình'],
+  ['EMP003', 'Lê Văn Cường'],
+  ['EMP-ADM', 'ADM'],
+  ['ADM', 'ADM'],
+]);
+
 function makeMemoryRepository() {
   const seed = buildSeed();
   const data = {
@@ -289,8 +298,8 @@ function makeMemoryRepository() {
     if (o1.close_sw !== 'N' && o1.close_sw !== '0') return null;
     if (o1.sheet_sta == null || o1.sheet_sta === '0') return null;
     if (!ELIGIBLE_NPL_RE.test(String(o2.goods_no || ''))) return null;
-    const emp = findEmp(o1.create_user);
-    if (emp === null || emp.emp_name === 'ADM') return null;
+    const userName = PO_CREATOR_USERS.get(o1.create_user);
+    if (userName == null || userName === 'ADM') return null;
     if (keeperEmpNo) {
       const assigned = data.assignments.some(
         (a) =>

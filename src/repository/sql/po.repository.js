@@ -40,7 +40,7 @@
  *   [3] lot nghiệp vụ     : pur_notice2.made_lot / pur_in2.made_lot
  *   [4] loại lot đã GRN   : pur_in2 (pur_no, goods_no, made_lot)
  *   [5] close_sw PO mở    : IN ('N', '0')  (mock 'N', T8 thật '0')
- *   [6] ADM filter        : e.emp_no = o1.create_user AND e.emp_name <> 'ADM'
+ *   [6] ADM filter        : u.user_no = o1.create_user AND u.user_name <> 'ADM'
  *   [7] order2 -> notice2 (PO identity fix 2026-10-29): khớp ĐỒNG THỜI
  *       pur_no = sheet_no, goods_no, def02 (null-safe) VÀ pur_id = sheet_id
  *       (pur_id của notice trỏ về DÒNG PO — sheet_id, không phải order2.id;
@@ -87,7 +87,7 @@ function isPg() {
  * 6 của toDialect quét qua từng cặp để thay.
  */
 const TABLE_PAIRS = [
-  ['bas_emp', TABLES.emps],
+  ['sys_userpass', TABLES.userPass],
   ['bas_goods', TABLES.goods],
   ['pur_order1', TABLES.order1],
   ['pur_order2', TABLES.order2],
@@ -391,7 +391,7 @@ class PoModel {
    *
    * Bản mới đẩy lọc sớm GIỐNG HỆT #PO của pipeline /pos (cùng scope user đã
    * duyệt khi audit /pos): chỉ PO mở close_sw IN ('N','0'), đã duyệt
-   * sheet_sta <> '0', người tạo có hồ sơ bas_emp và khác ADM, NPL M1-M6/A2.
+   * sheet_sta <> '0', người tạo có tài khoản sys_userpass và khác ADM, NPL M1-M6/A2.
    * HIỆN THỊ (rework 2026-10-29, no-max): BỎ gate assigned < sheet_qty —
    * sheet_qty chỉ là tham khảo, tổng allocated được vượt PO, PO KHÔNG ẩn
    * khi gán đủ/vượt. Chỉ còn đồng hồ tạm nhập 24h từ notice1.create_date
@@ -438,7 +438,7 @@ class PoModel {
       'mock' AS [source]
     FROM pur_order2 o2
     JOIN pur_order1 o1 ON o1.sheet_no = o2.sheet_no
-    JOIN bas_emp e ON e.emp_no = o1.create_user AND e.emp_name <> 'ADM'
+    JOIN sys_userpass u ON u.user_no = o1.create_user AND u.user_name <> 'ADM'
     LEFT JOIN bas_goods g ON g.goods_no = o2.goods_no
     LEFT JOIN (
       SELECT x.po_id, SUM(x.allocated_qty) AS assigned
@@ -532,7 +532,7 @@ class PoModel {
         'mock' AS [source]
       FROM pur_order2 o2
       JOIN pur_order1 o1 ON o1.sheet_no = o2.sheet_no
-      JOIN bas_emp e ON e.emp_no = o1.create_user AND e.emp_name <> 'ADM'
+      JOIN sys_userpass u ON u.user_no = o1.create_user AND u.user_name <> 'ADM'
       LEFT JOIN bas_goods g ON g.goods_no = o2.goods_no
       LEFT JOIN (
         SELECT x.po_id, SUM(x.allocated_qty) AS assigned
@@ -584,7 +584,7 @@ class PoModel {
     SELECT COUNT(*) AS [total]
     FROM pur_order2 o2
     JOIN pur_order1 o1 ON o1.sheet_no = o2.sheet_no
-    JOIN bas_emp e ON e.emp_no = o1.create_user AND e.emp_name <> 'ADM'
+    JOIN sys_userpass u ON u.user_no = o1.create_user AND u.user_name <> 'ADM'
     LEFT JOIN (
       SELECT x.po_id, SUM(x.allocated_qty) AS assigned
       FROM whs_slot_allocation x
@@ -968,7 +968,7 @@ class PoModel {
    *
    * Câu fill #PO: chỉ PO MỞ (close_sw IN ('N','0') — FIX AUDIT 2026-10-19:
    * trước đây thiếu filter này nên PO đóng còn gap lot vào kết quả), người
-  * tạo có hồ sơ bas_emp và khác ADM. HIỆN THỊ (rework 2026-10-29, no-max):
+  * tạo có tài khoản sys_userpass và khác ADM. HIỆN THỊ (rework 2026-10-29, no-max):
    * ĐÃ BỎ pushdown gate COALESCE(pa.assigned_total, 0) < sheet_qty —
    * sheet_qty chỉ là tham khảo, tổng allocated được vượt PO, PO không ẩn
    * khi gán đủ/vượt; áp cho cả list lẫn count (bucket đếm đúng tập hiển thị).
@@ -1059,8 +1059,8 @@ class PoModel {
     INTO #PO
     FROM pur_order2 o2
     JOIN pur_order1 o1 ON o1.sheet_no = o2.sheet_no
-    JOIN bas_emp e
-      ON e.emp_no = o1.create_user AND e.emp_name <> 'ADM'
+    JOIN sys_userpass u
+      ON u.user_no = o1.create_user AND u.user_name <> 'ADM'
     LEFT JOIN bas_goods g ON g.goods_no = o2.goods_no
     -- Tổng allocation theo PO (2026-10-28): assigned_total KỂ CẢ allocation
     -- đã close (so sánh với pur_order2.sheet_qty); gap_assigned = phần

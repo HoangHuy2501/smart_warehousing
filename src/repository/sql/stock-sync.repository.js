@@ -29,8 +29,10 @@ async function findNoticeCoverage(noticeIds, tx) {
                   AND i.unit_no = n.unit_no
                   AND EXISTS (
                       SELECT 1 FROM ${TABLES.in1} h
+                      JOIN ${TABLES.userPass} u
+                        ON u.user_no = h.create_user AND u.user_name <> 'ADM'
                       WHERE h.sheet_no = i.sheet_no
-                        AND h.sheet_sta <> '0' AND h.create_user <> 'ADM'
+                        AND h.sheet_sta <> '0'
                   )
             ), 0) AS imported_qty,
             (
