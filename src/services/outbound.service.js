@@ -70,6 +70,32 @@ async function plan(source) {
     });
 }
 
+function logOutboundPick(line, pick, actionKey, userId, qty, actedAt, detail, tx) {
+    return shared.logActivity({
+        userId,
+        actedAt,
+        actionKey,
+        allocationId: pick.allocation_id,
+        noticeDetailId: pick.notice_detail_id,
+        slotCode: pick.slot_code,
+        qty: Number(qty),
+        unit: line.unit_no,
+        detail: JSON.stringify({
+            sheetNo: line.sheet_no,
+            sourceDetailId: line.scm_out_detail_id,
+            pickId: String(pick.id),
+            allocationReceiptId: pick.allocation_receipt_id,
+            goodsNo: line.goods_no,
+            madeLot: line.made_lot,
+            unit: line.unit_no,
+            requestedQty: line.qty,
+            plannedQty: pick.planned,
+            pickedQty: qty,
+            ...detail,
+        }),
+    }, tx);
+}
+
 async function confirm(id, actor) {
     return db.withTransaction(async (tx) => {
         await repo.lock(tx);
@@ -91,10 +117,14 @@ async function confirm(id, actor) {
             pending.some((old) => old.id === item.id))) {
             if (!sameShelf(pick, line)) err('outbound_shelf_changed', 409);
             if (!shared.canAccessSlot(actor, { keeperId: pick.keeper_emp_no })) err('no_permission', 403);
-            if (!await repo.debitAllocationStock(pick.allocation_id, pick.planned, tx)) {
-                err('outbound_shelf_changed', 409);
-            }
+            const stockAfter = await repo.debitAllocationStock(pick.allocation_id, pick.planned, tx);
+            if (stockAfter == null) err('outbound_shelf_changed', 409);
             await repo.confirmPick(pick.id, actor.id, now, tx);
+            await logOutboundPick(line, pick, 'OUTBOUND_PICK_CONFIRMED', actor.id, pick.planned, now, {
+                pickedAt: now,
+                stockBefore: decimal(amount(stockAfter) + amount(pick.planned)),
+                stockAfter,
+            }, tx);
         }
         for (const allocationId of allocationIds) await repo.closeEmptyAllocation(allocationId, now, tx);
         const confirmed = (await repo.picks(id, tx)).reduce((sum, pick) => sum + amount(pick.picked), 0n);
@@ -123,16 +153,12 @@ async function complete(id) {
         const now = new Date();
         await repo.setStatus(id, 'COMPLETED', now, tx);
         for (const pick of current) {
-            await shared.logActivity({
-                userId: pick.picked_by_emp_no,
-                actionKey: 'OUTBOUND_COMPLETE',
-                allocationId: pick.allocation_id,
-                noticeDetailId: pick.notice_detail_id,
-                slotCode: pick.slot_code,
-                qty: Number(pick.picked),
-                unit: line.unit_no,
-                detail: JSON.stringify({ sheetNo: line.sheet_no, goodsNo: line.goods_no,
-                    madeLot: line.made_lot, sourceDetailId: id }),
+            await logOutboundPick(line, pick, 'OUTBOUND_COMPLETE', pick.picked_by_emp_no, pick.picked, now, {
+                pickedAt: pick.picked_at,
+                completedAt: now,
+                printStatus: source.def03.trim(),
+                approvalStatus: String(source.sheet_sta),
+                completedBy: 'outbound-completion',
             }, tx);
         }
         return true;

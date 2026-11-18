@@ -140,8 +140,8 @@ async function setStatus(id, status, completedAt, tx) {
 }
 
 async function debitAllocationStock(id, qty, tx) {
-    const output = db.getDialect() === 'pg' ? '' : 'OUTPUT inserted.id';
-    const returning = db.getDialect() === 'pg' ? 'RETURNING id' : '';
+    const output = db.getDialect() === 'pg' ? '' : 'OUTPUT CAST(inserted.qty_in_stock AS VARCHAR(40)) AS stock_after';
+    const returning = db.getDialect() === 'pg' ? 'RETURNING CAST(qty_in_stock AS VARCHAR(40)) AS stock_after' : '';
     const { rows } = await tx(`
         UPDATE ${t.allocation}
         SET qty_in_stock = qty_in_stock - CAST(? AS DECIMAL(18,8))
@@ -150,7 +150,7 @@ async function debitAllocationStock(id, qty, tx) {
           AND qty_in_stock >= CAST(? AS DECIMAL(18,8))
         ${returning}
     `, [qty, id, qty]);
-    return rows.length === 1;
+    return rows[0]?.stock_after ?? null;
 }
 
 async function closeEmptyAllocation(id, now, tx) {
