@@ -164,12 +164,16 @@ async function listNotifications(actor) {
     const { rows } = await db.query(`
         SELECT l.scm_out_detail_id, l.sheet_no, l.goods_no, l.made_lot,
                l.unit_no, l.requested_qty, l.status, l.created_at,
+               o.sheet_no AS po_number,
+               (SELECT MAX(g.goods_name) FROM ${t.goods} g WHERE g.goods_no = l.goods_no) AS material_name,
                p.id AS pick_id, p.slot_code, p.allocation_id, p.planned_qty, p.picked_qty, p.picked_at,
                COALESCE(totals.planned_qty, 0) AS total_planned_qty,
                COALESCE(r.qty_in_stock - CAST(used.used_qty AS DECIMAL(18,8)), 0) AS available_qty
         FROM ${t.outboundLine} l
         LEFT JOIN ${t.outboundPick} p ON p.scm_out_detail_id = l.scm_out_detail_id
         LEFT JOIN ${t.slots} s ON s.code = p.slot_code
+        LEFT JOIN ${t.allocation} a ON a.id = p.allocation_id
+        LEFT JOIN ${t.order2} o ON o.id = a.po_id
         LEFT JOIN ${t.receipt} r ON r.id = p.allocation_receipt_id
         LEFT JOIN (
             SELECT scm_out_detail_id, SUM(planned_qty) AS planned_qty

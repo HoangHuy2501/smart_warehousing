@@ -384,7 +384,7 @@ function buildSwaggerSpec() {
       '/api/warehouse/outbound-notifications': {
         get: {
           summary: 'Thông báo xuất kho theo phiếu và kệ được phân quyền',
-          responses: { 200: { description: 'Danh sách phiếu, các dòng xuất và lượt lấy trên kệ' } },
+          responses: { 200: { description: 'Danh sách phiếu. Mỗi dòng có goodsNo, materialName, madeLot và poNumbers. Mỗi lượt lấy có poNumber theo lượt gán kệ.' } },
         },
       },
       '/api/warehouse/outbound-notifications/{id}/confirm': {

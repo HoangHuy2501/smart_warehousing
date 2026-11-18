@@ -175,6 +175,8 @@ async function notifications(actor) {
             lines.set(row.scm_out_detail_id, {
                 id: row.scm_out_detail_id,
                 goodsNo: row.goods_no,
+                materialName: row.material_name?.trim() || null,
+                poNumbers: [],
                 madeLot: row.made_lot,
                 unit: row.unit_no,
                 requestedQty: Number(row.requested_qty),
@@ -184,10 +186,14 @@ async function notifications(actor) {
                 picks: [],
             });
         }
-        if (row.pick_id != null) lines.get(row.scm_out_detail_id).picks.push({
+        const line = lines.get(row.scm_out_detail_id);
+        const poNumber = row.po_number?.trim() || null;
+        if (poNumber && !line.poNumbers.includes(poNumber)) line.poNumbers.push(poNumber);
+        if (row.pick_id != null) line.picks.push({
             id: String(row.pick_id),
             allocationId: row.allocation_id,
             shelfCode: row.slot_code,
+            poNumber,
             plannedQty: Number(row.planned_qty),
             pickedQty: row.picked_qty == null ? null : Number(row.picked_qty),
             pickedAt: row.picked_at,
