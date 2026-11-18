@@ -165,8 +165,8 @@ async function complete(id) {
     });
 }
 
-async function notifications(actor) {
-    const rows = await repo.listNotifications(actor);
+async function notifications(actor, sheetNo) {
+    const rows = await repo.listNotifications(actor, sheetNo);
     const sheets = new Map();
     for (const row of rows) {
         if (!sheets.has(row.sheet_no)) sheets.set(row.sheet_no, new Map());
