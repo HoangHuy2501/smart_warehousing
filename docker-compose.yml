@@ -78,7 +78,6 @@ services:
     stop_grace_period: 40s
 
   outbound-worker:
-    profiles: [outbound]
     build: .
     init: true
     env_file: .env
