@@ -6,7 +6,7 @@ const db = require('../config/db');
 const workerConfig = require('../config/worker.config');
 const { createAppWorker } = require('../util/worker/create-app-worker');
 const { getWorkerQueue, closeQueues } = require('../util/worker/queue');
-const { closeRedisConnections } = require('../util/worker/redis');
+const { closeRedisConnections, getProducerRedisConnection } = require('../util/worker/redis');
 const { registerShutdownHandler } = require('../util/worker/graceful-shutdown');
 const { createWorkerLogger } = require('../util/worker/logger');
 const { createDiscoverySweep, processCompletionSweep } = require('../services/jobs/outbound.job');
@@ -33,6 +33,7 @@ async function main() {
     const problems = workerConfig.validateWorkerConfig(production);
     for (const problem of problems) logger.warn('worker_config_invalid', { problem });
     if (production && problems.length) throw new Error('Worker config validation failed');
+    getProducerRedisConnection();
     registerShutdownHandler('close_redis', closeRedisConnections);
     registerShutdownHandler('close_queue', closeQueues);
     await startWorker('outbound-discovery', '1-59/5 * * * *', createDiscoverySweep(date));

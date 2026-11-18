@@ -364,6 +364,23 @@ function buildSwaggerSpec() {
           responses: { 200: { description: 'Nhật ký phân trang' }, 403: ERROR_RESPONSE },
         },
       },
+      '/api/warehouse/outbound-notifications/revision': {
+        get: {
+          summary: 'Phiên bản dữ liệu thông báo xuất kho',
+          responses: {
+            200: {
+              description: 'Tín hiệu cập nhật. Khi Redis không đọc được, available là false.',
+              content: { 'application/json': { schema: {
+                type: 'object',
+                properties: {
+                  available: { type: 'boolean' },
+                  revision: { type: 'string', nullable: true },
+                },
+              } } },
+            },
+          },
+        },
+      },
       '/api/warehouse/outbound-notifications': {
         get: {
           summary: 'Thông báo xuất kho theo phiếu và kệ được phân quyền',

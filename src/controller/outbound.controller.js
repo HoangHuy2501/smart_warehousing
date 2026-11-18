@@ -2,6 +2,7 @@
 
 const outbound = require('../services/outbound.service');
 const { err } = require('../services/shared');
+const { readOutboundRevision } = require('../util/worker/outbound-revision');
 
 async function list(req, res) {
     res.json(await outbound.notifications(req.actor));
@@ -13,4 +14,9 @@ async function confirm(req, res) {
     res.json(await outbound.confirm(id, req.actor));
 }
 
-module.exports = { list, confirm };
+async function revision(req, res) {
+    res.set('Cache-Control', 'no-store');
+    res.json(await readOutboundRevision());
+}
+
+module.exports = { list, confirm, revision };
