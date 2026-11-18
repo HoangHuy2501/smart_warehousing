@@ -624,7 +624,7 @@ class LotModel {
    * @param {string} slotCode mã kệ
    * @returns {Promise<Record<string, unknown> | null>}
    */
-  async findActiveAllocationByPoAndSlot(poId, slotCode) {
+  async findActiveAllocationByPoAndSlot(poId, slotCode, query = db.query) {
     const sql = `
     -- DECLARE @poId INT = 3;
     -- DECLARE @slotCode NVARCHAR(20) = 'A-01-1';
@@ -690,7 +690,7 @@ class LotModel {
   `;
     const params = [poId, slotCode];
     guardParams(params);
-    const { rows } = await db.query(toDialect(sql), params);
+    const { rows } = await query(toDialect(sql), params);
     return rows[0] || null;
   }
 

@@ -44,6 +44,8 @@ const { err, genId, shared } = require('./shared');
 const { toApiLot } = require('./mappers');
 const { createWorkerLogger } = require('../util/worker/logger');
 const db = require('../config/db');
+const OutboundRepository = require('../repository/sql/outbound.repository');
+const { publishOutboundRevision } = require('../util/worker/outbound-revision');
 const logger = createWorkerLogger('lot-service');
 /** @type {import('./receipt-sync.service').ReceiptSyncServices} */
 const receiptSync = require('./receipt-sync.service');
@@ -405,164 +407,143 @@ class LotServices {
 
     const qty = Number(dto.qty);
     if (!Number.isFinite(qty) || qty <= 0) err('qty_invalid');
-    if (qty > lot.qty + 1e-9) err('qty_exceed');
-
-    // GUARD #17 (Option A — user chưa chốt rule chia receipt khi move):
-    // phần hàng T8 đã confirmed (received_qty của allocation NGUỒN) không
-    // được chuyển đi — sau move nguồn phải vẫn thỏa allocated >= received,
-    // nếu không receipt ở nguồn sẽ vượt allocated (corrupt reconcile).
-    // Chỉ cho move phần CHƯA nhận: qty <= allocated - received.
-    // (Move toàn bộ khi chưa có receipt nào vẫn chạy bình thường —
-    // moveAllocationSlot đổi slot_code, receipt giữ nguyên allocation.)
-    // Đây là fast-fail NGOÀI tx cho UX — tính toán CHÍNH TẮC nằm trong
-    // transaction bên dưới (allocation lock + recheck fresh #23-#26).
-    const receivedTotal = await ReceiptRepository.sumReceivedByAllocation(
-      lot.id
-    );
-    const maxMovable = Number(lot.qty) - receivedTotal;
-    if (qty > maxMovable + 1e-9) err('qty_exceed');
-
     const now = new Date().toISOString();
-    let targetAllocationId = null;
+    const outboundEnabled = db.getMode() !== 'memory' && Boolean(process.env.OUTBOUND_SYNC_START_DATE);
+    let resyncTargetId;
+    let movedWhole = false;
+    try {
+      await db.withTransaction(async (txQuery) => {
+        if (outboundEnabled) await OutboundRepository.lock(txQuery);
+        await ReceiptSyncRepository.acquireAllocationLock(lot.id, txQuery);
+        const fresh = await ReceiptSyncRepository.findAllocationForSync(lot.id, txQuery);
+        if (!fresh || fresh.closedAt) err('not_found', 404);
+        if (fresh.slotCode !== lot.shelfCode) err('lot_slot_changed', 409);
+        const destination = await LotRepository.findActiveAllocationByPoAndSlot(lot.poId, dto.targetSlotCode, txQuery);
+        if (destination) err('move_target_has_po', 409);
+        if (target.full) err('slot_full');
 
-    // Kệ đích đã có allocation active cùng PO? → merge số lượng
-    // (không chiếm kệ mới) nên bỏ qua kiểm tra slot_full.
-    const targetAlloc = await LotRepository.findActiveAllocationByPoAndSlot(
-      lot.poId,
-      dto.targetSlotCode
-    );
-    if (!targetAlloc && target.full) err('slot_full');
+        const isStock = fresh.status === 'IN_STOCK';
+        const stock = Number(fresh.qtyInStock ?? 0);
+        const returned = Number(fresh.qtyReturn ?? 0);
+        const isReturned = fresh.status === 'RETURNED';
+        const movable = isStock || isReturned || fresh.status === 'WAITING_STOCK'
+          ? stock + returned : fresh.allocatedQty;
+        if (qty > movable + 1e-9) err('qty_exceed');
+        const whole = Math.abs(qty - movable) <= 1e-9;
+        let targetAllocationId = lot.id;
 
-    // RACE FIX #23-#26 (Worker-vs-Move): toàn bộ phần ghi số lượng chạy
-    // trong 1 db.withTransaction, giữ CÙNG allocation advisory lock
-    // (class 9202) với Receipt Worker — worker giữ lock này khi reconcile
-    // receipt của allocation, nên move và receipt-sync KHÔNG THỂ xen kẽ
-    // giữa lúc đọc tổng received và lúc giảm allocated_qty. Lock order:
-    // move chỉ lấy allocation lock (1 lock — không thể deadlock với
-    // worker vốn lấy theo thứ tự allocation → notice). Trong tx RE-READ
-    // fresh allocated/received bằng câu WHS-only (không JOIN T8 display
-    // #27) rồi mới quyết định; decreaseAllocationQty còn có guard atomic
-    // SUM(received) ngay trong WHERE (tầng phòng thủ 2).
-    let mergedIntoTarget = false;
-    let createdNewAllocation = false;
-    await db.withTransaction(async (txQuery) => {
-      await ReceiptSyncRepository.acquireAllocationLock(lot.id, txQuery);
-      const fresh = await ReceiptSyncRepository.findAllocationForSync(
-        lot.id,
-        txQuery
-      );
-      if (!fresh || fresh.closedAt) err('not_found', 404);
-      if (qty > Number(fresh.allocatedQty) + 1e-9) err('qty_exceed');
-      const freshMovable =
-        Number(fresh.allocatedQty) - Number(fresh.receivedTotal);
-      if (qty > freshMovable + 1e-9) err('qty_exceed');
+        if (whole) {
+          if (!await LotRepository.moveAllocationSlot(lot.id, dto.targetSlotCode, txQuery)) err('not_found', 404);
+          if (outboundEnabled) await OutboundRepository.movePendingPicks(lot.id, dto.targetSlotCode, txQuery);
+          movedWhole = true;
+        } else {
+          targetAllocationId = genId('lot');
+          const receipts = await ReceiptRepository.findByAllocationId(lot.id, txQuery);
+          if (receipts.length > 1 || (stock > 0 && returned > 0) || Number(fresh.qtyAod ?? 0) > 0) {
+            err('move_split_ambiguous', 409);
+          }
+          const receipt = receipts[0];
+          if (receipt) {
+            await ReceiptSyncRepository.acquireNoticeLock(receipt.noticeDetailId, txQuery);
+            if (qty >= Number(receipt.receivedQty) - 1e-9) err('move_split_ambiguous', 409);
+          }
+          const reserve = outboundEnabled && isStock
+            ? await OutboundRepository.reservedForAllocation(lot.id, txQuery) : 0;
+          if (isStock && qty > stock - reserve + 1e-9) err('move_qty_reserved', 409);
 
-      const isFullMove = qty >= Number(fresh.allocatedQty) - 1e-9;
-      if (targetAlloc && targetAlloc.id !== lot.id) {
-        // Merge: cộng qty vào allocation kệ đích + giảm nguồn.
-        const increased = await LotRepository.increaseAllocationQty(
-          targetAlloc.id,
-          qty,
-          txQuery
-        );
-        if (!increased) err('not_found', 404);
-        targetAllocationId = targetAlloc.id;
-        const decreased = await LotRepository.decreaseAllocationQty(
-          lot.id,
-          qty,
-          txQuery
-        );
-        if (!decreased) err('qty_exceed');
-        mergedIntoTarget = true;
-        // Phần còn lại = 0 → đóng allocation nguồn (hạ khỏi kệ).
-        if (isFullMove) {
-          await LotRepository.closeAllocation(lot.id, now, txQuery);
-        }
-      } else if (isFullMove) {
-        // Chuyển toàn bộ: đổi slot_code của allocation hiện tại.
-        const moved = await LotRepository.moveAllocationSlot(
-          lot.id,
-          dto.targetSlotCode,
-          txQuery
-        );
-        if (!moved) err('not_found', 404);
-        targetAllocationId = lot.id;
-      } else {
-        // Chuyển một phần: tạo allocation mới trên kệ đích (cùng PO, khác
-        // kệ nên không vi phạm unique active (po_id, slot_code)).
-        // Receipt giữ nguyên phía allocation NGUỒN — không tự chia lại
-        // mapping (chưa có rule xác nhận cho việc chia receipt giữa các kệ).
-        // SEMANTIC KHỞI ĐẦU FRESH (#7-#9): phần move chỉ có thể là phần
-        // CHƯA RECEIPT (guard freshMovable phía trên) → kệ đích KHÔNG
-        // được copy lot_no/TEMP_IN/IQC từ nguồn (giả vờ T8 đã nhận phần
-        // vừa move là corrupt). Đích bắt đầu như allocation chưa receipt:
-        // lot_no NULL + PO_ASSIGNED + WAITING_IQC, không dữ liệu IQC;
-        // enqueueReceiptSync(target) phía dưới sẽ tự đối chiếu T8.
-        // Insert light: trong tx không refetch display JOIN T8 (#27).
-        const created = await LotRepository.insertAllocation(
-          {
-            id: genId('lot'),
-            po_id: lot.poId,
-            goods_no: lot.goodsNo,
-            lot_no: null,
-            warehouse_status: 'PO_ASSIGNED',
+          const movedStock = fresh.qtyInStock == null ? null : (isReturned ? 0 : stock > 0 ? qty : 0);
+          const movedReturn = fresh.qtyReturn == null ? null : (returned > 0 ? qty : 0);
+          const created = await LotRepository.insertAllocation({
+            id: targetAllocationId,
+            po_id: fresh.poId,
+            goods_no: fresh.goodsNo,
+            lot_no: fresh.lotNo,
+            warehouse_status: fresh.warehouseStatus,
             slot_code: dto.targetSlotCode,
             allocated_qty: qty,
-            status: 'WAITING_IQC',
-            status_recorded_at: now,
-            iqc_decision: null,
-            has_warning: 0,
-            qty_in_stock: null,
-            qty_return: null,
-            qty_aod: null,
-            last_iqc_at: null,
+            status: fresh.status,
+            status_recorded_at: fresh.statusRecordedAt,
+            iqc_decision: fresh.iqcDecision,
+            has_warning: fresh.hasWarning,
+            qty_in_stock: movedStock,
+            qty_return: movedReturn,
+            qty_aod: fresh.qtyAod,
+            last_iqc_at: fresh.lastIqcAt,
             allocated_by_emp_no: actor.id,
             allocated_at: now,
             closed_at: null,
+          }, txQuery, { light: true });
+          if (!created) err('not_found', 404);
+
+          if (receipt) {
+            const receiptStock = receipt.qtyInStock == null ? null : (Number(receipt.qtyInStock) > 0 ? qty : 0);
+            const receiptReturn = receipt.qtyReturn == null ? null : (Number(receipt.qtyReturn) > 0 ? qty : 0);
+            if (Number(receiptStock) > Number(receipt.qtyInStock) ||
+                Number(receiptReturn) > Number(receipt.qtyReturn) || Number(receipt.qtyAod ?? 0) > 0 ||
+                (Number(receiptStock) > 0 && Number(receiptReturn) > 0)) err('move_split_ambiguous', 409);
+
+            const updatedReceipt = await ReceiptRepository.updateReceipt(receipt.id, {
+              received_qty: Number(receipt.receivedQty) - qty,
+              qty_in_stock: receiptStock == null ? null : Number(receipt.qtyInStock) - receiptStock,
+              qty_return: receiptReturn == null ? null : Number(receipt.qtyReturn) - receiptReturn,
+              updated_at: now,
+            }, txQuery);
+            if (!updatedReceipt) err('not_found', 404);
+            const splitReceipt = await ReceiptRepository.insertReceipt({
+              id: genId('rc'),
+              allocation_id: targetAllocationId,
+              notice_detail_id: receipt.noticeDetailId,
+              received_qty: qty,
+              lot_no: receipt.lotNo,
+              iqc_decision: receipt.iqcDecision,
+              qty_in_stock: receiptStock,
+              qty_return: receiptReturn,
+              qty_aod: receipt.qtyAod,
+              has_warning: receipt.hasWarning,
+              qc_date: receipt.qcDate,
+              confirmed_at: receipt.confirmedAt,
+              updated_at: now,
+            }, txQuery);
+            if (!splitReceipt) err('not_found', 404);
+          } else if (fresh.status === 'WAITING_IQC') {
+            resyncTargetId = targetAllocationId;
+          }
+
+          if (!await LotRepository.decreaseAllocationQty(lot.id, qty, txQuery)) err('qty_exceed');
+          if (!await LotRepository.updateAllocationLight(lot.id, {
+            qty_in_stock: movedStock == null ? null : stock - movedStock,
+            qty_return: movedReturn == null ? null : returned - movedReturn,
+          }, txQuery)) err('not_found', 404);
+        }
+
+        // Ghi lịch sử di chuyển giữa các kệ — cùng tx (chỉ WHS write).
+        await SlotRepository.insertMovement(
+          {
+            id: genId('mov'),
+            source_allocation_id: lot.id,
+            target_allocation_id: targetAllocationId,
+            from_slot_code: lot.shelfCode,
+            to_slot_code: dto.targetSlotCode,
+            qty,
+            moved_by_emp_no: actor.id,
+            moved_at: now,
+            note: dto.note ?? null,
           },
-          txQuery,
-          { light: true }
-        );
-        if (!created) err('not_found', 404);
-        targetAllocationId = created.id;
-        const decreased = await LotRepository.decreaseAllocationQty(
-          lot.id,
-          qty,
           txQuery
         );
-        if (!decreased) err('qty_exceed');
-        createdNewAllocation = true;
+      });
+    } catch (error) {
+      if ([2601, 2627].includes(error.number) || error.code === '23505') {
+        err('move_target_has_po', 409);
       }
+      throw error;
+    }
 
-      // Ghi lịch sử di chuyển giữa các kệ — cùng tx (chỉ WHS write).
-      await SlotRepository.insertMovement(
-        {
-          id: genId('mov'),
-          source_allocation_id: lot.id,
-          target_allocation_id: targetAllocationId,
-          from_slot_code: lot.shelfCode,
-          to_slot_code: dto.targetSlotCode,
-          qty,
-          moved_by_emp_no: actor.id,
-          moved_at: now,
-          note: dto.note ?? null,
-        },
-        txQuery
-      );
-    });
-
-    // #28: enqueue SAU commit — BullMQ add KHÔNG chạy trong DB transaction
-    // (Redis chậm không được giữ khóa allocation). #4: cả hai allocation
-    // đổi allocated_qty → re-sync receipt (target tăng — receipt target
-    // nếu có sẽ grow; nguồn giảm — còn thiếu thì sweep/job đón). Move trọn
-    // lô chỉ đổi slot_code, không đổi allocated/received → khỏi re-sync.
-    if (mergedIntoTarget) {
-      await enqueueReceiptSync(targetAlloc.id);
-      await enqueueReceiptSync(lot.id);
-    } else if (createdNewAllocation) {
-      await enqueueReceiptSync(targetAllocationId);
+    if (resyncTargetId) {
+      await enqueueReceiptSync(resyncTargetId);
       await enqueueReceiptSync(lot.id);
     }
+    if (movedWhole && outboundEnabled) void publishOutboundRevision();
 
     await shared.logActivity({
       userId: actor.id,

@@ -207,7 +207,25 @@ async function quantitiesByAllocation(ids) {
     return result;
 }
 
+async function movePendingPicks(allocationId, slotCode, tx) {
+    await tx(`UPDATE ${t.outboundPick} SET slot_code = ?
+        WHERE allocation_id = ? AND picked_at IS NULL
+          AND EXISTS (SELECT 1 FROM ${t.outboundLine} l
+            WHERE l.scm_out_detail_id = ${t.outboundPick}.scm_out_detail_id AND l.completed_at IS NULL)`,
+    [slotCode, allocationId]);
+}
+
+async function reservedForAllocation(id, tx) {
+    const { rows } = await tx(`
+        SELECT COALESCE(SUM(p.planned_qty), 0) AS reserved_qty
+        FROM ${t.outboundPick} p
+        JOIN ${t.outboundLine} l ON l.scm_out_detail_id = p.scm_out_detail_id
+        WHERE p.allocation_id = ? AND p.picked_at IS NULL AND l.completed_at IS NULL
+    `, [id]);
+    return Number(rows[0].reserved_qty);
+}
+
 module.exports = {
     discover, ready, lock, findSource, findLine, insertLine, available, insertPick,
-    picks, confirmPick, setStatus, debitAllocationStock, closeEmptyAllocation, listNotifications, quantitiesByAllocation,
+    picks, confirmPick, setStatus, debitAllocationStock, closeEmptyAllocation, listNotifications, quantitiesByAllocation, movePendingPicks, reservedForAllocation,
 };
