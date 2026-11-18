@@ -46,7 +46,7 @@ router.get('/slots', requireAuth, asyncHandler(controller.listSlots));
 router.get('/lots', requireAuth, limitSqlReads(controller.listLots));
 
 router.get('/outbound-notifications/revision', requireAuth, requireWarehouseOperator, asyncHandler(outbound.revision));
-router.get('/outbound-notifications', requireAuth, limitSqlReads(outbound.list));
+router.get('/outbound-notifications', requireAuth, requireWarehouseOperator, limitSqlReads(outbound.list));
 router.post('/outbound-notifications/:id/confirm', requireAuth, requireWarehouseOperator, asyncHandler(outbound.confirm));
 
 router.get('/incoming-pos', requireAuth, limitSqlReads(controller.listIncomingPos));

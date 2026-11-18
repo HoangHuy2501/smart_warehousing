@@ -183,22 +183,29 @@ async function notifications(actor) {
                 shortageQty: Math.max(0, Number(row.requested_qty) - Number(row.total_planned_qty)),
                 status: row.status,
                 createdAt: row.created_at,
+                canConfirm: false,
                 picks: [],
             });
         }
         const line = lines.get(row.scm_out_detail_id);
         const poNumber = row.po_number?.trim() || null;
         if (poNumber && !line.poNumbers.includes(poNumber)) line.poNumbers.push(poNumber);
-        if (row.pick_id != null) line.picks.push({
-            id: String(row.pick_id),
-            allocationId: row.allocation_id,
-            shelfCode: row.slot_code,
-            poNumber,
-            plannedQty: Number(row.planned_qty),
-            pickedQty: row.picked_qty == null ? null : Number(row.picked_qty),
-            pickedAt: row.picked_at,
-            availableQty: Number(row.available_qty),
-        });
+        if (row.pick_id != null) {
+            const canConfirm = row.status === 'WAITING_PICK' && row.picked_at == null &&
+                row.existing_slot_code != null && shared.canAccessSlot(actor, { keeperId: row.keeper_emp_no });
+            line.canConfirm ||= canConfirm;
+            line.picks.push({
+                id: String(row.pick_id),
+                allocationId: row.allocation_id,
+                shelfCode: row.slot_code,
+                poNumber,
+                plannedQty: Number(row.planned_qty),
+                pickedQty: row.picked_qty == null ? null : Number(row.picked_qty),
+                pickedAt: row.picked_at,
+                availableQty: Number(row.available_qty),
+                canConfirm,
+            });
+        }
     }
     return [...sheets].map(([sheetNo, lines]) => ({ sheetNo, lines: [...lines.values()] }));
 }

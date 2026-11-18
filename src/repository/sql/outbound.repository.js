@@ -160,13 +160,23 @@ async function closeEmptyAllocation(id, now, tx) {
 }
 
 async function listNotifications(actor) {
-    const scope = actor.role === 'MANAGER' ? '' : 'AND p.id IS NOT NULL AND (s.keeper_emp_no = ? OR s.keeper_emp_no IS NULL)';
+    const scope = actor.role === 'MANAGER' ? '' : `
+        AND (
+            s.keeper_emp_no = ?
+            OR EXISTS (
+                SELECT 1 FROM ${t.keeperMaterialAssignment} ma
+                WHERE ma.goods_no = l.goods_no AND ma.keeper_emp_no = ?
+                  AND ma.ended_at IS NULL
+            )
+        )
+    `;
     const { rows } = await db.query(`
         SELECT l.scm_out_detail_id, l.sheet_no, l.goods_no, l.made_lot,
                l.unit_no, l.requested_qty, l.status, l.created_at,
                o.sheet_no AS po_number,
                (SELECT MAX(g.goods_name) FROM ${t.goods} g WHERE g.goods_no = l.goods_no) AS material_name,
                p.id AS pick_id, p.slot_code, p.allocation_id, p.planned_qty, p.picked_qty, p.picked_at,
+               s.code AS existing_slot_code, s.keeper_emp_no,
                COALESCE(totals.planned_qty, 0) AS total_planned_qty,
                COALESCE(r.qty_in_stock - CAST(used.used_qty AS DECIMAL(18,8)), 0) AS available_qty
         FROM ${t.outboundLine} l
@@ -185,7 +195,7 @@ async function listNotifications(actor) {
         ) used ON used.allocation_receipt_id = r.id
         WHERE l.completed_at IS NULL ${scope}
         ORDER BY l.created_at DESC, l.scm_out_detail_id, p.id
-    `, actor.role === 'MANAGER' ? [] : [actor.id]);
+    `, actor.role === 'MANAGER' ? [] : [actor.id, actor.id]);
     return rows;
 }
 
