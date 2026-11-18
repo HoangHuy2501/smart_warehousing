@@ -2,7 +2,7 @@
 
 const outbound = require('../services/outbound.service');
 const { err } = require('../services/shared');
-const { readOutboundRevision } = require('../util/worker/outbound-revision');
+const { readOutboundRevision, publishOutboundRevision } = require('../util/worker/outbound-revision');
 
 async function list(req, res) {
     res.json(await outbound.notifications(req.actor));
@@ -11,7 +11,9 @@ async function list(req, res) {
 async function confirm(req, res) {
     const id = Number(req.params.id);
     if (!Number.isInteger(id) || id <= 0 || id > 2147483647) err('invalid_outbound_id');
-    res.json(await outbound.confirm(id, req.actor));
+    const { status, changed } = await outbound.confirm(id, req.actor);
+    res.json({ status });
+    if (changed) void publishOutboundRevision();
 }
 
 async function revision(req, res) {
