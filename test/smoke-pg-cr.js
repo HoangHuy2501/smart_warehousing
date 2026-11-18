@@ -14,6 +14,8 @@
  *
  * Cach chay: node smoke-pg-cr.js http://localhost:3117
  */
+const { setTimeout: delay } = require('node:timers/promises');
+
 const BASE = process.argv[2] || 'http://localhost:3117';
 let pass = 0;
 let fail = 0;
@@ -33,11 +35,19 @@ function check(name, cond, extra) {
 async function api(method, path, { token, body } = {}) {
   const headers = { 'Content-Type': 'application/json' };
   if (token) headers['x-auth-token'] = token;
-  const res = await fetch(BASE + path, {
+  const options = {
     method,
     headers,
     body: body ? JSON.stringify(body) : undefined,
-  });
+  };
+  let res = await fetch(BASE + path, options);
+  // Several scope checks read /pos in the same rate-limit window.
+  const retryAfter = Number(res.headers.get('Retry-After'));
+  if (method === 'GET' && res.status === 429 && retryAfter > 0 && retryAfter <= 5) {
+    await res.body?.cancel();
+    await delay(retryAfter * 1000);
+    res = await fetch(BASE + path, options);
+  }
   let json = null;
   try { json = await res.json(); } catch { /* ignore */ }
   return { status: res.status, json };
