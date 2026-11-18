@@ -54,10 +54,11 @@ async function plan(source) {
         const picks = await repo.picks(id, tx);
         const reserved = picks.reduce((total, pick) => total + amount(pick.planned), 0n);
         let remaining = amount(source.requested_qty) - reserved;
-        if (remaining <= 0n) return;
+        if (remaining <= 0n) return !existing;
         const existingReceipts = new Set(picks.map((pick) => pick.allocation_receipt_id));
         const candidates = (await repo.available(source, tx))
             .filter((candidate) => !existingReceipts.has(candidate.receipt_id));
+        const initialRemaining = remaining;
         for (const candidate of prioritizeShelves(candidates)) {
             const available = amount(candidate.available_qty);
             const qty = available < remaining ? available : remaining;
@@ -65,6 +66,7 @@ async function plan(source) {
             remaining -= qty;
             if (remaining === 0n) break;
         }
+        return !existing || remaining < initialRemaining;
     });
 }
 
