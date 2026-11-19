@@ -59,11 +59,19 @@ async function plan(source) {
         const candidates = (await repo.available(source, tx))
             .filter((candidate) => !existingReceipts.has(candidate.receipt_id));
         const initialRemaining = remaining;
+        const allocationRemaining = new Map();
         for (const candidate of prioritizeShelves(candidates)) {
-            const available = amount(candidate.available_qty);
+            if (!allocationRemaining.has(candidate.allocation_id)) {
+                allocationRemaining.set(candidate.allocation_id, amount(candidate.allocation_available_qty));
+            }
+            const stock = allocationRemaining.get(candidate.allocation_id);
+            const receiptAvailable = amount(candidate.available_qty);
+            const available = receiptAvailable < stock ? receiptAvailable : stock;
+            if (available <= 0n) continue;
             const qty = available < remaining ? available : remaining;
             await repo.insertPick(id, candidate, decimal(qty), tx);
             remaining -= qty;
+            allocationRemaining.set(candidate.allocation_id, stock - qty);
             if (remaining === 0n) break;
         }
         return !existing || remaining < initialRemaining;
@@ -177,6 +185,7 @@ async function complete(id) {
 
 async function notifications(actor, sheetNo) {
     const rows = await repo.listNotifications(actor, sheetNo);
+    const poNumbers = await repo.poNumbersForLines([...new Set(rows.map((row) => row.scm_out_detail_id))]);
     const sheets = new Map();
     for (const row of rows) {
         if (!sheets.has(row.sheet_no)) sheets.set(row.sheet_no, new Map());
@@ -186,7 +195,7 @@ async function notifications(actor, sheetNo) {
                 id: row.scm_out_detail_id,
                 goodsNo: row.goods_no,
                 materialName: row.material_name?.trim() || null,
-                poNumbers: [],
+                poNumbers: [...(poNumbers.get(row.scm_out_detail_id) || [])].sort(),
                 madeLot: row.made_lot,
                 unit: row.unit_no,
                 requestedQty: Number(row.requested_qty),
