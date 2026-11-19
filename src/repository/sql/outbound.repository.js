@@ -16,6 +16,16 @@ async function discover(since, after, limit) {
         WHERE LEFT(h.rem, 3) = N'已下达' AND h.create_date >= ?
           AND d.id > ? AND d.made_lot IS NOT NULL AND LTRIM(RTRIM(d.made_lot)) <> ''
           AND d.sheet_qty > 0 AND d.unit_no IS NOT NULL
+          AND EXISTS (
+              SELECT 1 FROM ${t.allocation} a
+              JOIN ${t.receipt} r ON r.allocation_id = a.id
+              JOIN ${t.notice2} n ON n.id = r.notice_detail_id
+              JOIN ${t.slots} s ON s.code = a.slot_code
+              WHERE a.goods_no = d.goods_no AND r.lot_no = d.made_lot
+                AND n.unit_no = d.unit_no
+                AND a.status = 'IN_STOCK' AND a.closed_at IS NULL
+                AND s.active = ? AND a.qty_in_stock > 0 AND r.qty_in_stock > 0
+          )
           AND NOT EXISTS (
               SELECT 1 FROM ${t.outboundLine} l
               WHERE l.scm_out_detail_id = d.id
@@ -25,7 +35,7 @@ async function discover(since, after, limit) {
                 ), 0))
           )
         ORDER BY d.id OFFSET 0 ROWS FETCH NEXT ? ROWS ONLY
-    `, [since, after, limit]);
+    `, [since, after, true, limit]);
     return rows;
 }
 
@@ -112,7 +122,11 @@ async function available(line, tx) {
     const { rows } = await tx(`
         WITH candidates AS (
             SELECT r.id AS receipt_id, a.id AS allocation_id, a.slot_code,
-                   r.qty_in_stock, a.allocated_at
+                   r.qty_in_stock, a.allocated_at,
+                   a.qty_in_stock - COALESCE((
+                       SELECT SUM(p.planned_qty) FROM ${t.outboundPick} p
+                       WHERE p.allocation_id = a.id AND p.picked_at IS NULL
+                   ), 0) AS allocation_available_qty
             FROM ${t.receipt} r
             JOIN ${t.allocation} a ON a.id = r.allocation_id
             JOIN ${t.notice2} n ON n.id = r.notice_detail_id
@@ -126,10 +140,11 @@ async function available(line, tx) {
             GROUP BY p.allocation_receipt_id
         )
         SELECT c.receipt_id, c.allocation_id, c.slot_code,
+            CAST(c.allocation_available_qty AS VARCHAR(40)) AS allocation_available_qty,
             CAST(c.qty_in_stock - CAST(COALESCE(u.qty, 0) AS DECIMAL(18,8)) AS VARCHAR(40)) AS available_qty
         FROM candidates c
         LEFT JOIN used u ON u.allocation_receipt_id = c.receipt_id
-        WHERE c.qty_in_stock > COALESCE(u.qty, 0)
+        WHERE c.qty_in_stock > COALESCE(u.qty, 0) AND c.allocation_available_qty > 0
         ORDER BY (c.qty_in_stock - CAST(COALESCE(u.qty, 0) AS DECIMAL(18,8))) DESC,
                  c.allocated_at, c.receipt_id
     `, [true, line.goods_no, line.made_lot, line.unit_no]);
@@ -223,7 +238,10 @@ async function listNotifications(actor, sheetNo) {
             SELECT allocation_receipt_id, SUM(COALESCE(picked_qty, planned_qty)) AS used_qty
             FROM ${t.outboundPick} GROUP BY allocation_receipt_id
         ) used ON used.allocation_receipt_id = r.id
-        WHERE l.completed_at IS NULL ${scope} ${sheetFilter}
+        WHERE l.completed_at IS NULL
+          AND EXISTS (SELECT 1 FROM ${t.outboundPick} visible
+              WHERE visible.scm_out_detail_id = l.scm_out_detail_id)
+          ${scope} ${sheetFilter}
         ORDER BY l.created_at DESC, l.scm_out_detail_id, p.id
     `, params);
     return rows;

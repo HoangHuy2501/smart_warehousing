@@ -50,20 +50,29 @@ async function plan(source) {
             !sameSource(latest, { ...source, qty: source.requested_qty })) return;
         const existing = await repo.findLine(id, tx);
         if (existing && (existing.status !== 'WAITING_PICK' || !sameSource(source, existing))) return;
+        const candidates = await repo.available(source, tx);
+        if (!existing && !candidates.length) return false;
         if (!existing) await repo.insertLine(source, tx);
         const picks = await repo.picks(id, tx);
         const reserved = picks.reduce((total, pick) => total + amount(pick.planned), 0n);
         let remaining = amount(source.requested_qty) - reserved;
         if (remaining <= 0n) return !existing;
         const existingReceipts = new Set(picks.map((pick) => pick.allocation_receipt_id));
-        const candidates = (await repo.available(source, tx))
-            .filter((candidate) => !existingReceipts.has(candidate.receipt_id));
+        const unreservedCandidates = candidates.filter((candidate) => !existingReceipts.has(candidate.receipt_id));
         const initialRemaining = remaining;
-        for (const candidate of prioritizeShelves(candidates)) {
-            const available = amount(candidate.available_qty);
+        const allocationRemaining = new Map();
+        for (const candidate of prioritizeShelves(unreservedCandidates)) {
+            if (!allocationRemaining.has(candidate.allocation_id)) {
+                allocationRemaining.set(candidate.allocation_id, amount(candidate.allocation_available_qty));
+            }
+            const stock = allocationRemaining.get(candidate.allocation_id);
+            const receiptAvailable = amount(candidate.available_qty);
+            const available = receiptAvailable < stock ? receiptAvailable : stock;
+            if (available <= 0n) continue;
             const qty = available < remaining ? available : remaining;
             await repo.insertPick(id, candidate, decimal(qty), tx);
             remaining -= qty;
+            allocationRemaining.set(candidate.allocation_id, stock - qty);
             if (remaining === 0n) break;
         }
         return !existing || remaining < initialRemaining;
