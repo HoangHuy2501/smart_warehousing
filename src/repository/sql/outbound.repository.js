@@ -29,6 +29,42 @@ async function discover(since, after, limit) {
     return rows;
 }
 
+const missingWaitingLine = `
+    l.status = 'WAITING_PICK'
+    AND NOT EXISTS (
+        SELECT 1 FROM ${t.outboundPick} p
+        WHERE p.scm_out_detail_id = l.scm_out_detail_id
+    )
+    AND NOT EXISTS (
+        SELECT 1 FROM ${t.out2} d
+        JOIN ${t.out1} h ON h.sheet_no = d.sheet_no
+        WHERE d.id = l.scm_out_detail_id
+    )
+`;
+
+async function findMissingWaitingLines(after, limit) {
+    const { rows } = await db.query(`
+        SELECT l.scm_out_detail_id
+        FROM ${t.outboundLine} l
+        WHERE l.scm_out_detail_id > ? AND ${missingWaitingLine}
+        ORDER BY l.scm_out_detail_id OFFSET 0 ROWS FETCH NEXT ? ROWS ONLY
+    `, [after, limit]);
+    return rows.map((row) => row.scm_out_detail_id);
+}
+
+async function isMissingWaitingLine(id, tx) {
+    const { rows } = await tx(`
+        SELECT l.scm_out_detail_id
+        FROM ${t.outboundLine} l
+        WHERE l.scm_out_detail_id = ? AND ${missingWaitingLine}
+    `, [id]);
+    return rows.length > 0;
+}
+
+async function deleteLine(id, tx) {
+    await tx(`DELETE FROM ${t.outboundLine} WHERE scm_out_detail_id = ?`, [id]);
+}
+
 async function ready(after, limit) {
     const { rows } = await db.query(`
         SELECT l.scm_out_detail_id
@@ -230,6 +266,6 @@ async function reservedForAllocation(id, tx) {
 }
 
 module.exports = {
-    discover, ready, lock, findSource, findLine, insertLine, available, insertPick,
+    discover, findMissingWaitingLines, isMissingWaitingLine, deleteLine, ready, lock, findSource, findLine, insertLine, available, insertPick,
     picks, confirmPick, setStatus, debitAllocationStock, closeEmptyAllocation, listNotifications, quantitiesByAllocation, movePendingPicks, reservedForAllocation,
 };

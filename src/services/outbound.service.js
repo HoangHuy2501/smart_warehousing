@@ -134,6 +134,16 @@ async function confirm(id, actor) {
     });
 }
 
+async function removeDeletedWaitingLine(id) {
+    return db.withTransaction(async (tx) => {
+        await repo.lock(tx);
+        if (!await repo.isMissingWaitingLine(id, tx)) return false;
+
+        await repo.deleteLine(id, tx);
+        return true;
+    });
+}
+
 async function complete(id) {
     return db.withTransaction(async (tx) => {
         await repo.lock(tx);
@@ -210,4 +220,4 @@ async function notifications(actor, sheetNo) {
     return [...sheets].map(([sheetNo, lines]) => ({ sheetNo, lines: [...lines.values()] }));
 }
 
-module.exports = { plan, confirm, complete, notifications };
+module.exports = { plan, confirm, complete, notifications, removeDeletedWaitingLine };
