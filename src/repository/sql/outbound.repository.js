@@ -16,6 +16,16 @@ async function discover(since, after, limit) {
         WHERE LEFT(h.rem, 3) = N'已下达' AND h.create_date >= ?
           AND d.id > ? AND d.made_lot IS NOT NULL AND LTRIM(RTRIM(d.made_lot)) <> ''
           AND d.sheet_qty > 0 AND d.unit_no IS NOT NULL
+          AND EXISTS (
+              SELECT 1 FROM ${t.allocation} a
+              JOIN ${t.receipt} r ON r.allocation_id = a.id
+              JOIN ${t.notice2} n ON n.id = r.notice_detail_id
+              JOIN ${t.slots} s ON s.code = a.slot_code
+              WHERE a.goods_no = d.goods_no AND r.lot_no = d.made_lot
+                AND n.unit_no = d.unit_no
+                AND a.status = 'IN_STOCK' AND a.closed_at IS NULL
+                AND s.active = ? AND a.qty_in_stock > 0 AND r.qty_in_stock > 0
+          )
           AND NOT EXISTS (
               SELECT 1 FROM ${t.outboundLine} l
               WHERE l.scm_out_detail_id = d.id
@@ -25,7 +35,7 @@ async function discover(since, after, limit) {
                 ), 0))
           )
         ORDER BY d.id OFFSET 0 ROWS FETCH NEXT ? ROWS ONLY
-    `, [since, after, limit]);
+    `, [since, after, true, limit]);
     return rows;
 }
 
@@ -228,39 +238,13 @@ async function listNotifications(actor, sheetNo) {
             SELECT allocation_receipt_id, SUM(COALESCE(picked_qty, planned_qty)) AS used_qty
             FROM ${t.outboundPick} GROUP BY allocation_receipt_id
         ) used ON used.allocation_receipt_id = r.id
-        WHERE l.completed_at IS NULL ${scope} ${sheetFilter}
+        WHERE l.completed_at IS NULL
+          AND EXISTS (SELECT 1 FROM ${t.outboundPick} visible
+              WHERE visible.scm_out_detail_id = l.scm_out_detail_id)
+          ${scope} ${sheetFilter}
         ORDER BY l.created_at DESC, l.scm_out_detail_id, p.id
     `, params);
     return rows;
-}
-
-async function poNumbersForLines(ids) {
-    const result = new Map();
-    for (let offset = 0; offset < ids.length; offset += 500) {
-        const chunk = ids.slice(offset, offset + 500);
-        const placeholders = chunk.map(() => '?').join(', ');
-        const { rows } = await db.query(`
-            SELECT l.scm_out_detail_id, n.pur_no AS po_number
-            FROM ${t.outboundLine} l
-            JOIN ${t.notice2} n ON n.goods_no = l.goods_no AND n.made_lot = l.made_lot
-            WHERE l.scm_out_detail_id IN (${placeholders})
-              AND n.pur_no IS NOT NULL AND LTRIM(RTRIM(n.pur_no)) <> ''
-            UNION
-            SELECT l.scm_out_detail_id, o.sheet_no AS po_number
-            FROM ${t.outboundLine} l
-            JOIN ${t.allocation} a ON a.goods_no = l.goods_no
-            JOIN ${t.receipt} r ON r.allocation_id = a.id AND r.lot_no = l.made_lot
-            JOIN ${t.order2} o ON o.id = a.po_id
-            WHERE l.scm_out_detail_id IN (${placeholders})
-        `, [...chunk, ...chunk]);
-        for (const row of rows) {
-            const po = row.po_number?.trim();
-            if (!po) continue;
-            if (!result.has(row.scm_out_detail_id)) result.set(row.scm_out_detail_id, new Set());
-            result.get(row.scm_out_detail_id).add(po);
-        }
-    }
-    return result;
 }
 
 async function quantitiesByAllocation(ids) {
@@ -300,6 +284,6 @@ async function reservedForAllocation(id, tx) {
 }
 
 module.exports = {
-    poNumbersForLines, discover, findMissingWaitingLines, isMissingWaitingLine, deleteLine, ready, lock, findSource, findLine, insertLine, available, insertPick,
+    discover, findMissingWaitingLines, isMissingWaitingLine, deleteLine, ready, lock, findSource, findLine, insertLine, available, insertPick,
     picks, confirmPick, setStatus, debitAllocationStock, closeEmptyAllocation, listNotifications, quantitiesByAllocation, movePendingPicks, reservedForAllocation,
 };

@@ -50,17 +50,18 @@ async function plan(source) {
             !sameSource(latest, { ...source, qty: source.requested_qty })) return;
         const existing = await repo.findLine(id, tx);
         if (existing && (existing.status !== 'WAITING_PICK' || !sameSource(source, existing))) return;
+        const candidates = await repo.available(source, tx);
+        if (!existing && !candidates.length) return false;
         if (!existing) await repo.insertLine(source, tx);
         const picks = await repo.picks(id, tx);
         const reserved = picks.reduce((total, pick) => total + amount(pick.planned), 0n);
         let remaining = amount(source.requested_qty) - reserved;
         if (remaining <= 0n) return !existing;
         const existingReceipts = new Set(picks.map((pick) => pick.allocation_receipt_id));
-        const candidates = (await repo.available(source, tx))
-            .filter((candidate) => !existingReceipts.has(candidate.receipt_id));
+        const unreservedCandidates = candidates.filter((candidate) => !existingReceipts.has(candidate.receipt_id));
         const initialRemaining = remaining;
         const allocationRemaining = new Map();
-        for (const candidate of prioritizeShelves(candidates)) {
+        for (const candidate of prioritizeShelves(unreservedCandidates)) {
             if (!allocationRemaining.has(candidate.allocation_id)) {
                 allocationRemaining.set(candidate.allocation_id, amount(candidate.allocation_available_qty));
             }
@@ -185,7 +186,6 @@ async function complete(id) {
 
 async function notifications(actor, sheetNo) {
     const rows = await repo.listNotifications(actor, sheetNo);
-    const poNumbers = await repo.poNumbersForLines([...new Set(rows.map((row) => row.scm_out_detail_id))]);
     const sheets = new Map();
     for (const row of rows) {
         if (!sheets.has(row.sheet_no)) sheets.set(row.sheet_no, new Map());
@@ -195,7 +195,7 @@ async function notifications(actor, sheetNo) {
                 id: row.scm_out_detail_id,
                 goodsNo: row.goods_no,
                 materialName: row.material_name?.trim() || null,
-                poNumbers: [...(poNumbers.get(row.scm_out_detail_id) || [])].sort(),
+                poNumbers: [],
                 madeLot: row.made_lot,
                 unit: row.unit_no,
                 requestedQty: Number(row.requested_qty),
