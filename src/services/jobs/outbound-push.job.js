@@ -13,7 +13,6 @@ const { validEndpoint, vapidConfig } = require('../push-device.service');
 const QUEUE_NAME = 'outbound-push';
 const DELIVERY_TTL = 30 * 24 * 60 * 60;
 const CLAIM_TTL = 120;
-const DELIVERY_CONCURRENCY = 8;
 const logger = createWorkerLogger(QUEUE_NAME);
 const UPDATE_CLAIM = `
     if redis.call('GET', KEYS[1]) ~= ARGV[1] then return 0 end
@@ -91,30 +90,28 @@ async function processOutboundPush(job) {
     let sent = 0;
     const notices = new Map();
     let skipped = 0;
-    for (let offset = 0; offset < recipients.length; offset += DELIVERY_CONCURRENCY) {
-        await Promise.all(recipients.slice(offset, offset + DELIVERY_CONCURRENCY).map(async (device) => {
-            const context = {
-                sheetNo, empNo: device.emp_no, subscriptionId: device.id,
-                platform: device.platform,
-            };
-            try {
-                if (!notices.has(device.emp_no)) {
-                    notices.set(device.emp_no,
-                        notifications({ id: device.emp_no, role: device.role }, sheetNo)
-                            .then(([notice]) => notice?.lines.length ? payloadFor(notice) : null));
-                }
-                const payload = await notices.get(device.emp_no);
-                const result = payload
-                    ? await deliver(redis, device, sheetNo, payload, vapid) : 'no_visible_lines';
-                if (result === 'sent') sent += 1;
-                else skipped += 1;
-                logger.info('outbound_push_device_result', { ...context, result });
-            } catch {
-                failures += 1;
-                logger.error('outbound_push_device_failed', context);
+    await Promise.all(recipients.map(async (device) => {
+        const context = {
+            sheetNo, empNo: device.emp_no, subscriptionId: device.id,
+            platform: device.platform,
+        };
+        try {
+            if (!notices.has(device.emp_no)) {
+                notices.set(device.emp_no,
+                    notifications({ id: device.emp_no, role: device.role }, sheetNo)
+                        .then(([notice]) => notice?.lines.length ? payloadFor(notice) : null));
             }
-        }));
-    }
+            const payload = await notices.get(device.emp_no);
+            const result = payload
+                ? await deliver(redis, device, sheetNo, payload, vapid) : 'no_visible_lines';
+            if (result === 'sent') sent += 1;
+            else skipped += 1;
+            logger.info('outbound_push_device_result', { ...context, result });
+        } catch {
+            failures += 1;
+            logger.error('outbound_push_device_failed', context);
+        }
+    }));
     logger.info('outbound_push_result', { sheetNo, recipients: recipients.length, sent, skipped, failures });
     if (failures) throw new Error('outbound_push_delivery_failed');
     return { sent };

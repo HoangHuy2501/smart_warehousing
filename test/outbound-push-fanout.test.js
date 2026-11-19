@@ -9,7 +9,7 @@ const subscriptions = require('../src/repository/sql/push-subscription.repositor
 const outbound = require('../src/services/outbound.service');
 const devices = require('../src/services/push-device.service');
 
-test('delivers to Android and iOS per device with bounded concurrency and independent retries', async (t) => {
+test('delivers to Android and iOS per device concurrently to all devices with independent retries', async (t) => {
     const logs = [];
     t.mock.method(console, 'log', (line) => logs.push(JSON.parse(line)));
     t.mock.method(console, 'error', (line) => logs.push(JSON.parse(line)));
@@ -64,7 +64,7 @@ test('delivers to Android and iOS per device with bounded concurrency and indepe
     const { processOutboundPush } = require('../src/services/jobs/outbound-push.job');
     await assert.rejects(processOutboundPush({ data: { sheetNo: 'OUT-1' } }), /outbound_push_delivery_failed/);
     assert.equal(sentTo.length, 18);
-    assert.ok(maxActive > 1 && maxActive <= 8);
+    assert.equal(maxActive, recipients.length);
     assert.equal(noticeReads.mock.callCount(), 18);
     assert.equal(sentTo.filter(({ endpoint }) => endpoint.endsWith('/0')).length, 1);
     assert.ok(sentTo.every(({ payload }) => payload.body.includes('Số lượng: 100 YD')));
