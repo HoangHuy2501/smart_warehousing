@@ -404,7 +404,7 @@ function buildSwaggerSpec() {
       '/api/warehouse/outbound-notifications': {
         get: {
           summary: 'Thông báo xuất kho theo phân công NPL hoặc kệ',
-          responses: { 200: { description: 'Chủ quản thấy mọi dòng đang xử lý. Thủ kho thấy dòng có NPL được phân công hoặc kệ do mình quản lý. Mỗi dòng và lượt lấy có canConfirm.' } },
+          responses: { 200: { description: 'Chủ quản thấy mọi dòng đang xử lý. Thủ kho thấy dòng có NPL được phân công hoặc kệ do mình quản lý. Mỗi dòng và lượt lấy có canConfirm. requestedQty và unit giữ lượng và đơn vị xuất T8. stockRequestedQty và stockUnit là lượng đã quy đổi sang tồn kho bằng pur_unit_rate, làm tròn 3 chữ số thập phân khi khác đơn vị. picks[].plannedQty, pickedQty, availableQty dùng picks[].unit (đơn vị tồn kho). shortageQty dùng đơn vị xuất.' } },
         },
       },
       '/api/warehouse/outbound-notifications/{id}/confirm': {
