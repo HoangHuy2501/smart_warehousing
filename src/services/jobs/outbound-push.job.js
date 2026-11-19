@@ -33,12 +33,17 @@ function payloadFor(notice) {
     const clipped = (value, size) => String(value || '').slice(0, size);
     const poNumbers = line.poNumbers.slice(0, 3).map((po) => clipped(po, 50));
     const po = poNumbers.length ? poNumbers.join(', ') : 'Chưa xác định PO';
-    const npl = [line.goodsNo, clipped(line.materialName, 100)].filter(Boolean).join(' ');
+    const shelves = [...new Set(line.picks.map((pick) => pick.shelfCode).filter(Boolean))];
     const url = `/outbound?sheet=${encodeURIComponent(sheetNo)}`;
     return JSON.stringify({
         title: `Phiếu xuất ${sheetNo}`,
-        body: [po, npl, line.madeLot, `${line.requestedQty} ${line.unit || ''}`.trim(),
-            lines.length > 1 ? `+${lines.length - 1} dòng hàng` : ''].filter(Boolean).join(' · '),
+        body: [
+            `PO: ${po}`,
+            `NPL: ${line.goodsNo} · Lot: ${line.madeLot}`,
+            `Kệ: ${shelves.length ? shelves.join(', ') : 'Chưa có kệ đề xuất'}`,
+            `Số lượng: ${line.requestedQty} ${line.unit || ''}`.trim(),
+            lines.length > 1 ? `+${lines.length - 1} dòng hàng · Mở phiếu để xem` : '',
+        ].filter(Boolean).join('\n'),
         tag: `outbound-${sheetNo}`,
         sheetNo,
         url,
