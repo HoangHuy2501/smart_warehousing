@@ -13,6 +13,7 @@ const { validEndpoint, vapidConfig } = require('../push-device.service');
 const QUEUE_NAME = 'outbound-push';
 const DELIVERY_TTL = 30 * 24 * 60 * 60;
 const CLAIM_TTL = 120;
+const DELIVERY_CONCURRENCY = 8;
 const logger = createWorkerLogger(QUEUE_NAME);
 const UPDATE_CLAIM = `
     if redis.call('GET', KEYS[1]) ~= ARGV[1] then return 0 end
@@ -52,11 +53,11 @@ function payloadFor(notice) {
 }
 
 async function deliver(redis, device, sheetNo, payload, vapidDetails) {
-    if (!validEndpoint(device.endpoint)) return false;
+    if (!validEndpoint(device.endpoint)) return 'invalid_endpoint';
     const hash = createHash('sha256').update(JSON.stringify([device.emp_no, device.id, sheetNo])).digest('hex');
     const key = `${config.prefix}:outbound:push:${hash}`;
     const claim = randomUUID();
-    if (!await redis.set(key, claim, 'EX', CLAIM_TTL, 'NX')) return false;
+    if (!await redis.set(key, claim, 'EX', CLAIM_TTL, 'NX')) return 'deduplicated';
 
     try {
         await webPush.sendNotification({
@@ -67,14 +68,17 @@ async function deliver(redis, device, sheetNo, payload, vapidDetails) {
         await redis.eval(UPDATE_CLAIM, 1, key, claim, 'release', DELIVERY_TTL);
         if (error.statusCode === 404 || error.statusCode === 410) {
             await subscriptions.removeExpired(device);
-            return false;
+            return 'expired';
         }
-        logger.warn('push_provider_error', { sheetNo, statusCode: error.statusCode ?? null });
+        logger.warn('push_provider_error', {
+            sheetNo, empNo: device.emp_no, subscriptionId: device.id,
+            platform: device.platform, statusCode: error.statusCode ?? null,
+        });
         throw new Error('outbound_push_provider_failed');
     }
 
     await redis.eval(UPDATE_CLAIM, 1, key, claim, 'sent', DELIVERY_TTL);
-    return true;
+    return 'sent';
 }
 
 async function processOutboundPush(job) {
@@ -86,19 +90,32 @@ async function processOutboundPush(job) {
     let failures = 0;
     let sent = 0;
     const notices = new Map();
-    for (const device of recipients) {
-        try {
-            if (!notices.has(device.emp_no)) {
-                const [notice] = await notifications({ id: device.emp_no, role: device.role }, sheetNo);
-                notices.set(device.emp_no, notice?.lines.length ? payloadFor(notice) : null);
+    let skipped = 0;
+    for (let offset = 0; offset < recipients.length; offset += DELIVERY_CONCURRENCY) {
+        await Promise.all(recipients.slice(offset, offset + DELIVERY_CONCURRENCY).map(async (device) => {
+            const context = {
+                sheetNo, empNo: device.emp_no, subscriptionId: device.id,
+                platform: device.platform,
+            };
+            try {
+                if (!notices.has(device.emp_no)) {
+                    notices.set(device.emp_no,
+                        notifications({ id: device.emp_no, role: device.role }, sheetNo)
+                            .then(([notice]) => notice?.lines.length ? payloadFor(notice) : null));
+                }
+                const payload = await notices.get(device.emp_no);
+                const result = payload
+                    ? await deliver(redis, device, sheetNo, payload, vapid) : 'no_visible_lines';
+                if (result === 'sent') sent += 1;
+                else skipped += 1;
+                logger.info('outbound_push_device_result', { ...context, result });
+            } catch {
+                failures += 1;
+                logger.error('outbound_push_device_failed', context);
             }
-            const payload = notices.get(device.emp_no);
-            if (payload && await deliver(redis, device, sheetNo, payload, vapid)) sent += 1;
-        } catch {
-            failures += 1;
-        }
+        }));
     }
-    logger.info('outbound_push_result', { sheetNo, recipients: recipients.length, sent, failures });
+    logger.info('outbound_push_result', { sheetNo, recipients: recipients.length, sent, skipped, failures });
     if (failures) throw new Error('outbound_push_delivery_failed');
     return { sent };
 }
