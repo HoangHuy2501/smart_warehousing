@@ -44,7 +44,7 @@ async function removeExpired(subscription) {
 
 async function findRecipients(sheetNo) {
     const { rows } = await db.query(`
-        SELECT d.id, d.emp_no, d.endpoint, d.p256dh, d.auth, u.role
+        SELECT d.id, d.emp_no, d.endpoint, d.p256dh, d.auth, d.platform, u.role
         FROM ${t.pushSubscription} d
         JOIN ${t.userRole} u ON u.emp_no = d.emp_no
         WHERE u.active = ? AND u.locked = ? AND u.role IN ('MANAGER', 'KEEPER')

@@ -52,11 +52,11 @@ function payloadFor(notice) {
 }
 
 async function deliver(redis, device, sheetNo, payload, vapidDetails) {
-    if (!validEndpoint(device.endpoint)) return false;
+    if (!validEndpoint(device.endpoint)) return 'invalid_endpoint';
     const hash = createHash('sha256').update(JSON.stringify([device.emp_no, device.id, sheetNo])).digest('hex');
     const key = `${config.prefix}:outbound:push:${hash}`;
     const claim = randomUUID();
-    if (!await redis.set(key, claim, 'EX', CLAIM_TTL, 'NX')) return false;
+    if (!await redis.set(key, claim, 'EX', CLAIM_TTL, 'NX')) return 'deduplicated';
 
     try {
         await webPush.sendNotification({
@@ -67,14 +67,17 @@ async function deliver(redis, device, sheetNo, payload, vapidDetails) {
         await redis.eval(UPDATE_CLAIM, 1, key, claim, 'release', DELIVERY_TTL);
         if (error.statusCode === 404 || error.statusCode === 410) {
             await subscriptions.removeExpired(device);
-            return false;
+            return 'expired';
         }
-        logger.warn('push_provider_error', { sheetNo, statusCode: error.statusCode ?? null });
+        logger.warn('push_provider_error', {
+            sheetNo, empNo: device.emp_no, subscriptionId: device.id,
+            platform: device.platform, statusCode: error.statusCode ?? null,
+        });
         throw new Error('outbound_push_provider_failed');
     }
 
     await redis.eval(UPDATE_CLAIM, 1, key, claim, 'sent', DELIVERY_TTL);
-    return true;
+    return 'sent';
 }
 
 async function processOutboundPush(job) {
@@ -86,19 +89,30 @@ async function processOutboundPush(job) {
     let failures = 0;
     let sent = 0;
     const notices = new Map();
-    for (const device of recipients) {
+    let skipped = 0;
+    await Promise.all(recipients.map(async (device) => {
+        const context = {
+            sheetNo, empNo: device.emp_no, subscriptionId: device.id,
+            platform: device.platform,
+        };
         try {
             if (!notices.has(device.emp_no)) {
-                const [notice] = await notifications({ id: device.emp_no, role: device.role }, sheetNo);
-                notices.set(device.emp_no, notice?.lines.length ? payloadFor(notice) : null);
+                notices.set(device.emp_no,
+                    notifications({ id: device.emp_no, role: device.role }, sheetNo)
+                        .then(([notice]) => notice?.lines.length ? payloadFor(notice) : null));
             }
-            const payload = notices.get(device.emp_no);
-            if (payload && await deliver(redis, device, sheetNo, payload, vapid)) sent += 1;
+            const payload = await notices.get(device.emp_no);
+            const result = payload
+                ? await deliver(redis, device, sheetNo, payload, vapid) : 'no_visible_lines';
+            if (result === 'sent') sent += 1;
+            else skipped += 1;
+            logger.info('outbound_push_device_result', { ...context, result });
         } catch {
             failures += 1;
+            logger.error('outbound_push_device_failed', context);
         }
-    }
-    logger.info('outbound_push_result', { sheetNo, recipients: recipients.length, sent, failures });
+    }));
+    logger.info('outbound_push_result', { sheetNo, recipients: recipients.length, sent, skipped, failures });
     if (failures) throw new Error('outbound_push_delivery_failed');
     return { sent };
 }
