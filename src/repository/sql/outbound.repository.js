@@ -6,8 +6,10 @@ const { TABLES: t, outboundRecipientPredicate } = require('./tables');
 const source = `
     SELECT d.id, d.sheet_no, d.goods_no, d.made_lot, d.unit_no,
            CAST(d.sheet_qty AS VARCHAR(40)) AS requested_qty,
-           h.def03, h.sheet_sta, h.rem
+           h.def03, h.sheet_sta, h.rem,
+           g.unit_no AS stock_unit, CAST(g.pur_unit_rate AS VARCHAR(40)) AS pur_unit_rate
     FROM ${t.out2} d JOIN ${t.out1} h ON h.sheet_no = d.sheet_no
+    LEFT JOIN ${t.goods} g ON g.goods_no = d.goods_no
 `;
 
 async function discover(since, after, limit) {
@@ -22,7 +24,7 @@ async function discover(since, after, limit) {
               JOIN ${t.notice2} n ON n.id = r.notice_detail_id
               JOIN ${t.slots} s ON s.code = a.slot_code
               WHERE a.goods_no = d.goods_no AND r.lot_no = d.made_lot
-                AND n.unit_no = d.unit_no
+                AND n.unit_no = COALESCE(g.unit_no, d.unit_no)
                 AND a.status = 'IN_STOCK' AND a.closed_at IS NULL
                 AND s.active = ? AND a.qty_in_stock > 0 AND r.qty_in_stock > 0
           )
@@ -105,8 +107,11 @@ async function findSource(id, tx) {
 
 async function findLine(id, tx) {
     const { rows } = await tx(`
-        SELECT *, CAST(requested_qty AS VARCHAR(40)) AS qty
-        FROM ${t.outboundLine} WHERE scm_out_detail_id = ?
+        SELECT l.*, CAST(l.requested_qty AS VARCHAR(40)) AS qty,
+               g.unit_no AS stock_unit, CAST(g.pur_unit_rate AS VARCHAR(40)) AS pur_unit_rate
+        FROM ${t.outboundLine} l
+        LEFT JOIN ${t.goods} g ON g.goods_no = l.goods_no
+        WHERE l.scm_out_detail_id = ?
     `, [id]);
     return rows[0];
 }
@@ -147,7 +152,7 @@ async function available(line, tx) {
         WHERE c.qty_in_stock > COALESCE(u.qty, 0) AND c.allocation_available_qty > 0
         ORDER BY (c.qty_in_stock - CAST(COALESCE(u.qty, 0) AS DECIMAL(18,8))) DESC,
                  c.allocated_at, c.receipt_id
-    `, [true, line.goods_no, line.made_lot, line.unit_no]);
+    `, [true, line.goods_no, line.made_lot, line.stock_unit || line.unit_no]);
     return rows;
 }
 
@@ -218,6 +223,7 @@ async function listNotifications(actor, sheetNo) {
     const { rows } = await db.query(`
         SELECT l.scm_out_detail_id, l.sheet_no, l.goods_no, l.made_lot,
                l.unit_no, l.requested_qty, l.status, l.created_at,
+               g.unit_no AS stock_unit, CAST(g.pur_unit_rate AS VARCHAR(40)) AS pur_unit_rate,
                o.sheet_no AS po_number,
                (SELECT MAX(g.goods_name) FROM ${t.goods} g WHERE g.goods_no = l.goods_no) AS material_name,
                p.id AS pick_id, p.slot_code, p.allocation_id, p.planned_qty, p.picked_qty, p.picked_at,
@@ -225,6 +231,7 @@ async function listNotifications(actor, sheetNo) {
                COALESCE(totals.planned_qty, 0) AS total_planned_qty,
                COALESCE(r.qty_in_stock - CAST(used.used_qty AS DECIMAL(18,8)), 0) AS available_qty
         FROM ${t.outboundLine} l
+        LEFT JOIN ${t.goods} g ON g.goods_no = l.goods_no
         LEFT JOIN ${t.outboundPick} p ON p.scm_out_detail_id = l.scm_out_detail_id
         LEFT JOIN ${t.slots} s ON s.code = p.slot_code
         LEFT JOIN ${t.allocation} a ON a.id = p.allocation_id

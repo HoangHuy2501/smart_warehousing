@@ -16,6 +16,24 @@ function decimal(value) {
     return `${value / SCALE}.${String(value % SCALE).padStart(8, '0')}`;
 }
 
+function stockQuantity(line) {
+    const quantity = amount(line.requested_qty ?? line.qty);
+    if (!line.stock_unit || line.stock_unit.trim() === line.unit_no?.trim()) return quantity;
+    const rate = amount(line.pur_unit_rate);
+    if (rate <= 0n) err('outbound_invalid_pur_unit_rate', 409);
+    const rounded = (quantity * 1000n + rate / 2n) / rate;
+    if (rounded <= 0n) err('outbound_invalid_converted_qty', 409);
+    return rounded * (SCALE / 1000n);
+}
+
+function outboundShortage(line) {
+    const remaining = stockQuantity(line) - amount(line.total_planned_qty);
+    if (remaining <= 0n) return 0;
+    const rate = line.stock_unit && line.stock_unit.trim() !== line.unit_no?.trim()
+        ? amount(line.pur_unit_rate) : SCALE;
+    return Number((remaining * rate / SCALE + 50000n) / 100000n) / 1000;
+}
+
 function sameSource(source, line) {
     return source && ['sheet_no', 'goods_no', 'made_lot', 'unit_no'].every((key) =>
         source[key] === line[key]) && amount(source.requested_qty) === amount(line.qty);
@@ -24,7 +42,7 @@ function sameSource(source, line) {
 function sameShelf(pick, line) {
     return pick.allocation_status === 'IN_STOCK' && !pick.closed_at &&
         pick.current_slot === pick.slot_code && pick.current_goods === line.goods_no &&
-        pick.current_lot === line.made_lot && pick.current_unit === line.unit_no &&
+        pick.current_lot === line.made_lot && pick.current_unit?.trim() === (line.stock_unit || line.unit_no)?.trim() &&
         amount(pick.stock_qty) >= amount(pick.committed_qty);
 }
 
@@ -50,12 +68,13 @@ async function plan(source) {
             !sameSource(latest, { ...source, qty: source.requested_qty })) return;
         const existing = await repo.findLine(id, tx);
         if (existing && (existing.status !== 'WAITING_PICK' || !sameSource(source, existing))) return;
-        const candidates = await repo.available(source, tx);
+        const required = stockQuantity(latest);
+        const candidates = await repo.available(latest, tx);
         if (!existing && !candidates.length) return false;
         if (!existing) await repo.insertLine(source, tx);
         const picks = await repo.picks(id, tx);
         const reserved = picks.reduce((total, pick) => total + amount(pick.planned), 0n);
-        let remaining = amount(source.requested_qty) - reserved;
+        let remaining = required - reserved;
         if (remaining <= 0n) return !existing;
         const existingReceipts = new Set(picks.map((pick) => pick.allocation_receipt_id));
         const unreservedCandidates = candidates.filter((candidate) => !existingReceipts.has(candidate.receipt_id));
@@ -88,7 +107,7 @@ function logOutboundPick(line, pick, actionKey, userId, qty, actedAt, detail, tx
         noticeDetailId: pick.notice_detail_id,
         slotCode: pick.slot_code,
         qty: Number(qty),
-        unit: line.unit_no,
+        unit: line.stock_unit || line.unit_no,
         detail: JSON.stringify({
             sheetNo: line.sheet_no,
             sourceDetailId: line.scm_out_detail_id,
@@ -98,6 +117,9 @@ function logOutboundPick(line, pick, actionKey, userId, qty, actedAt, detail, tx
             madeLot: line.made_lot,
             unit: line.unit_no,
             requestedQty: line.qty,
+            stockUnit: line.stock_unit || line.unit_no,
+            purUnitRate: line.pur_unit_rate,
+            stockRequestedQty: decimal(stockQuantity(line)),
             plannedQty: pick.planned,
             pickedQty: qty,
             ...detail,
@@ -137,7 +159,7 @@ async function confirm(id, actor) {
         }
         for (const allocationId of allocationIds) await repo.closeEmptyAllocation(allocationId, now, tx);
         const confirmed = (await repo.picks(id, tx)).reduce((sum, pick) => sum + amount(pick.picked), 0n);
-        const status = confirmed === amount(line.qty) ? 'PICKED' : 'WAITING_PICK';
+        const status = confirmed === stockQuantity(line) ? 'PICKED' : 'WAITING_PICK';
         await repo.setStatus(id, status, null, tx);
         return { status, changed: true };
     });
@@ -165,7 +187,7 @@ async function complete(id) {
 
         const current = await repo.picks(id, tx);
         const total = current.reduce((sum, pick) => sum + amount(pick.picked), 0n);
-        if (total !== amount(line.qty) || current.some((pick) => !pick.picked_at || !pick.picked_by_emp_no)) {
+        if (total !== stockQuantity(line) || current.some((pick) => !pick.picked_at || !pick.picked_by_emp_no)) {
             return false;
         }
 
@@ -199,7 +221,9 @@ async function notifications(actor, sheetNo) {
                 madeLot: row.made_lot,
                 unit: row.unit_no,
                 requestedQty: Number(row.requested_qty),
-                shortageQty: Math.max(0, Number(row.requested_qty) - Number(row.total_planned_qty)),
+                shortageQty: outboundShortage(row),
+                stockUnit: row.stock_unit || row.unit_no,
+                stockRequestedQty: Number(decimal(stockQuantity(row))),
                 status: row.status,
                 createdAt: row.created_at,
                 canConfirm: false,
@@ -218,6 +242,7 @@ async function notifications(actor, sheetNo) {
                 allocationId: row.allocation_id,
                 shelfCode: row.slot_code,
                 poNumber,
+                unit: row.stock_unit || row.unit_no,
                 plannedQty: Number(row.planned_qty),
                 pickedQty: row.picked_qty == null ? null : Number(row.picked_qty),
                 pickedAt: row.picked_at,
