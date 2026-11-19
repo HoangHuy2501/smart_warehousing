@@ -60,10 +60,6 @@ async function discover(since, after, limit) {
 const missingWaitingLine = `
     l.status = 'WAITING_PICK'
     AND NOT EXISTS (
-        SELECT 1 FROM ${t.outboundPick} p
-        WHERE p.scm_out_detail_id = l.scm_out_detail_id
-    )
-    AND NOT EXISTS (
         SELECT 1 FROM ${t.out2} d
         JOIN ${t.out1} h ON h.sheet_no = d.sheet_no
         WHERE d.id = l.scm_out_detail_id
@@ -90,6 +86,7 @@ async function isMissingWaitingLine(id, tx) {
 }
 
 async function deleteLine(id, tx) {
+    await tx(`DELETE FROM ${t.outboundPick} WHERE scm_out_detail_id = ?`, [id]);
     await tx(`DELETE FROM ${t.outboundLine} WHERE scm_out_detail_id = ?`, [id]);
 }
 
