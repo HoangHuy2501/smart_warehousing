@@ -3,11 +3,24 @@
 const db = require('../../config/db');
 const { TABLES: t, outboundRecipientPredicate } = require('./tables');
 
+const stockUnit = `(
+    SELECT MAX(n.unit_no)
+    FROM ${t.allocation} a
+    JOIN ${t.receipt} r ON r.allocation_id = a.id
+    JOIN ${t.notice2} n ON n.id = r.notice_detail_id
+    JOIN ${t.slots} s ON s.code = a.slot_code
+    WHERE a.goods_no = d.goods_no AND r.lot_no = d.made_lot
+      AND a.status = 'IN_STOCK' AND a.closed_at IS NULL
+      AND s.active = ${db.getDialect() === 'pg' ? 'TRUE' : '1'}
+      AND a.qty_in_stock > 0 AND r.qty_in_stock > 0
+    HAVING COUNT(DISTINCT n.unit_no) = 1
+)`;
+
 const source = `
     SELECT d.id, d.sheet_no, d.goods_no, d.made_lot, d.unit_no,
            CAST(d.sheet_qty AS VARCHAR(40)) AS requested_qty,
            h.def03, h.sheet_sta, h.rem,
-           g.unit_no AS stock_unit, CAST(g.pur_unit_rate AS VARCHAR(40)) AS pur_unit_rate
+           ${stockUnit} AS stock_unit, CAST(g.pur_unit_rate AS VARCHAR(40)) AS pur_unit_rate
     FROM ${t.out2} d JOIN ${t.out1} h ON h.sheet_no = d.sheet_no
     LEFT JOIN ${t.goods} g ON g.goods_no = d.goods_no
 `;
@@ -24,14 +37,17 @@ async function discover(since, after, limit) {
               JOIN ${t.notice2} n ON n.id = r.notice_detail_id
               JOIN ${t.slots} s ON s.code = a.slot_code
               WHERE a.goods_no = d.goods_no AND r.lot_no = d.made_lot
-                AND n.unit_no = COALESCE(g.unit_no, d.unit_no)
+                AND n.unit_no = ${stockUnit}
                 AND a.status = 'IN_STOCK' AND a.closed_at IS NULL
                 AND s.active = ? AND a.qty_in_stock > 0 AND r.qty_in_stock > 0
           )
           AND NOT EXISTS (
               SELECT 1 FROM ${t.outboundLine} l
               WHERE l.scm_out_detail_id = d.id
-                AND (l.status <> 'WAITING_PICK' OR l.requested_qty <= COALESCE((
+                AND (l.status <> 'WAITING_PICK' OR
+                    CASE WHEN ${stockUnit} = d.unit_no THEN l.requested_qty
+                         ELSE ROUND(l.requested_qty / NULLIF(g.pur_unit_rate, 0), 3)
+                    END <= COALESCE((
                     SELECT SUM(p.planned_qty) FROM ${t.outboundPick} p
                     WHERE p.scm_out_detail_id = l.scm_out_detail_id
                 ), 0))
@@ -108,7 +124,14 @@ async function findSource(id, tx) {
 async function findLine(id, tx) {
     const { rows } = await tx(`
         SELECT l.*, CAST(l.requested_qty AS VARCHAR(40)) AS qty,
-               g.unit_no AS stock_unit, CAST(g.pur_unit_rate AS VARCHAR(40)) AS pur_unit_rate
+               (
+                   SELECT MAX(n.unit_no)
+                   FROM ${t.outboundPick} p
+                   JOIN ${t.receipt} r ON r.id = p.allocation_receipt_id
+                   JOIN ${t.notice2} n ON n.id = r.notice_detail_id
+                   WHERE p.scm_out_detail_id = l.scm_out_detail_id
+                   HAVING COUNT(DISTINCT n.unit_no) = 1
+               ) AS stock_unit, CAST(g.pur_unit_rate AS VARCHAR(40)) AS pur_unit_rate
         FROM ${t.outboundLine} l
         LEFT JOIN ${t.goods} g ON g.goods_no = l.goods_no
         WHERE l.scm_out_detail_id = ?
@@ -223,7 +246,7 @@ async function listNotifications(actor, sheetNo) {
     const { rows } = await db.query(`
         SELECT l.scm_out_detail_id, l.sheet_no, l.goods_no, l.made_lot,
                l.unit_no, l.requested_qty, l.status, l.created_at,
-               g.unit_no AS stock_unit, CAST(g.pur_unit_rate AS VARCHAR(40)) AS pur_unit_rate,
+               n.unit_no AS stock_unit, CAST(g.pur_unit_rate AS VARCHAR(40)) AS pur_unit_rate,
                o.sheet_no AS po_number,
                (SELECT MAX(g.goods_name) FROM ${t.goods} g WHERE g.goods_no = l.goods_no) AS material_name,
                p.id AS pick_id, p.slot_code, p.allocation_id, p.planned_qty, p.picked_qty, p.picked_at,
@@ -237,6 +260,7 @@ async function listNotifications(actor, sheetNo) {
         LEFT JOIN ${t.allocation} a ON a.id = p.allocation_id
         LEFT JOIN ${t.order2} o ON o.id = a.po_id
         LEFT JOIN ${t.receipt} r ON r.id = p.allocation_receipt_id
+        LEFT JOIN ${t.notice2} n ON n.id = r.notice_detail_id
         LEFT JOIN (
             SELECT scm_out_detail_id, SUM(planned_qty) AS planned_qty
             FROM ${t.outboundPick} GROUP BY scm_out_detail_id

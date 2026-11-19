@@ -68,6 +68,7 @@ async function plan(source) {
             !sameSource(latest, { ...source, qty: source.requested_qty })) return;
         const existing = await repo.findLine(id, tx);
         if (existing && (existing.status !== 'WAITING_PICK' || !sameSource(source, existing))) return;
+        if (!latest.stock_unit) return false;
         const required = stockQuantity(latest);
         const candidates = await repo.available(latest, tx);
         if (!existing && !candidates.length) return false;
