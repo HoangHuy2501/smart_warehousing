@@ -816,7 +816,7 @@ function buildSwaggerSpec() {
         post: {
           tags: ['Slots'],
           summary: 'MANAGER tao ke moi',
-          description: 'Tạo WHS và bas_st_bit cùng transaction. GIF3 ánh xạ kho T8 101, st_bit_no dùng chung mã kệ và st_bit_name cố định Smart-Warehousing. modify_user là ADM nếu mã nhân viên bắt đầu TEST, còn lại dùng mã nhân viên. Kệ T8 có sẵn cùng kho được dùng lại.',
+          description: 'Tạo WHS và bas_st_bit cùng transaction. GIF3 ánh xạ kho T8 101, st_bit_no dùng chung mã kệ và st_bit_name cố định Smart-Warehousing. modify_user là ADM nếu mã nhân viên bắt đầu TEST, còn lại dùng mã nhân viên. Kệ T8 có sẵn cùng kho được dùng lại. Mỗi lần ghi bas_st_bit đều ghi sys_oper_log trong cùng transaction với user_no, nội dung SQL chi tiết, GETDATE(), oper_type, smart-warehousing và w_bas_st_bit.',
           requestBody: JSON_BODY('#/components/schemas/CreateSlotDto'),
           responses: {
             201: {
@@ -884,7 +884,7 @@ function buildSwaggerSpec() {
             '403 { error: { code: "no_permission" } }; locked/active chi MANAGER. ' +
             'MANAGER có thể gửi code để đổi mã kệ chưa được sử dụng; đồng bộ WHS và bas_st_bit trong cùng transaction. ' +
             'Code mới phải cùng kho. Kệ có tham chiếu WHS hoặc T8 trả 409 slot_in_use/t8_slot_in_use; mã đích đã tồn tại bị từ chối. ' +
-            'Chỉ thao tác đổi mã mới ghi vào T8. Khóa, đầy, hoạt động và phân công thủ kho chỉ cập nhật WHS.',
+            'Chỉ thao tác đổi mã mới ghi vào T8 và sys_oper_log cùng transaction. Khóa, đầy, hoạt động và phân công thủ kho chỉ cập nhật WHS.',
           parameters: [
             {
               name: 'code',
