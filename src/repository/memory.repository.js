@@ -989,6 +989,17 @@ function makeMemoryRepository() {
         if (patch.active !== undefined) row.active = patch.active;
         return mapSlotRow(row, occupiedOf(code));
       },
+      async hasNonReturnedAllocation(code) {
+        return data.allocations.some((row) =>
+          row.slot_code === code && !row.closed_at && row.status !== 'RETURNED');
+      },
+      async hasReferences(code) {
+        return data.allocations.some((row) => row.slot_code === code) ||
+          data.movements.some((row) => row.from_slot_code === code || row.to_slot_code === code);
+      },
+      async deleteByCode(code) {
+        data.slots = data.slots.filter((row) => row.code !== code);
+      },
       async deleteAll() {
         data.slots = [];
       },

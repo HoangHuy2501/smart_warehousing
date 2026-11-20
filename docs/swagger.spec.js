@@ -816,6 +816,7 @@ function buildSwaggerSpec() {
         post: {
           tags: ['Slots'],
           summary: 'MANAGER tao ke moi',
+          description: 'Tạo whs_slots và bas_st_bit trong cùng transaction. GIF3 ánh xạ sang kho T8 101; st_bit_no dùng cùng mã kệ. Kệ đã tồn tại riêng trên T8 được dùng lại khi khớp kho. Lỗi đồng bộ sẽ rollback cả hai bảng. Kho chưa có ánh xạ trả 409 t8_warehouse_unmapped.',
           requestBody: JSON_BODY('#/components/schemas/CreateSlotDto'),
           responses: {
             201: {
@@ -826,6 +827,7 @@ function buildSwaggerSpec() {
             },
             400: ERROR_RESPONSE,
             403: ERROR_RESPONSE,
+            409: ERROR_RESPONSE,
           },
         },
       },
@@ -872,6 +874,22 @@ function buildSwaggerSpec() {
         },
       },
       '/api/warehouse/slots/{code}': {
+        delete: {
+          tags: ['Slots'],
+          summary: 'MANAGER xóa kệ khỏi WHS và T8',
+          description: 'Xóa trong cùng transaction. Kệ được tham chiếu bởi allocation, lịch sử di chuyển, lượt xuất hoặc bas_goods/pur_in2/scm_out2 bị chặn với 409 slot_in_use hoặc t8_slot_in_use.',
+          parameters: [{
+            name: 'code', in: 'path', required: true, schema: { type: 'string' },
+          }],
+          responses: {
+            200: { description: 'Đã xóa cả hai bảng', content: {
+              'application/json': { schema: { $ref: '#/components/schemas/Ok' } },
+            } },
+            403: ERROR_RESPONSE,
+            404: ERROR_RESPONSE,
+            409: ERROR_RESPONSE,
+          },
+        },
         patch: {
           tags: ['Slots'],
           summary: 'Cap nhat trang thai ke (locked / full / active)',
@@ -879,7 +897,9 @@ function buildSwaggerSpec() {
             'SHELF PERMISSION (Phase 2 2026-10-20, BE enforce): ' +
             'KEEPER chi duoc thao tac ke cua minh HOAC ke chua co chu so huu ' +
             '(keeper_emp_no NULL) — ke cua keeper khac tra ' +
-            '403 { error: { code: "no_permission" } }; locked/active chi MANAGER.',
+            '403 { error: { code: "no_permission" } }; locked/active chi MANAGER. ' +
+            'Cập nhật whs_slots và bas_st_bit trong cùng transaction. active tương ứng act_sw 1/0. ' +
+            'locked/full và phân công thủ kho được lưu ở WHS; T8 cập nhật modify_date/modify_user và bổ sung dòng danh mục còn thiếu.',
           parameters: [
             {
               name: 'code',
@@ -898,6 +918,7 @@ function buildSwaggerSpec() {
             400: ERROR_RESPONSE,
             403: ERROR_RESPONSE,
             404: ERROR_RESPONSE,
+            409: ERROR_RESPONSE,
           },
         },
       },

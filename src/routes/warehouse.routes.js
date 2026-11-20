@@ -133,6 +133,13 @@ router.patch(
   asyncHandler(controller.updateSlot)
 );
 
+router.delete(
+  '/slots/:code',
+  requireAuth,
+  requireManager,
+  asyncHandler(controller.deleteSlot)
+);
+
 router.post(
   '/activity/qr-print',
   requireAuth,

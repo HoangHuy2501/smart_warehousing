@@ -34,10 +34,15 @@ const updateSlot = async (req, res) => {
   res.json({ ok: true });
 };
 
+const deleteSlot = async (req, res) => {
+  await SlotService.deleteSlot(req.params.code, req.actor.id);
+  res.json({ ok: true });
+};
+
 const logQrPrint = async (req, res) => {
   bindActor(req);
   await SlotService.logQrPrint(req.body);
   res.status(201).json({ ok: true });
 };
 
-module.exports = { createSlot, assignKeeper, updateSlot, logQrPrint };
+module.exports = { createSlot, assignKeeper, updateSlot, deleteSlot, logQrPrint };
