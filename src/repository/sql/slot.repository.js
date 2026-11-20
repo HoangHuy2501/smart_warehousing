@@ -333,7 +333,7 @@ class SlotModel {
    * @param {string} code mã kệ
    * @returns {Promise<Record<string, unknown> | null>}
    */
-  async byCode(code) {
+  async byCode(code, query = db.query) {
     const sql = `
     -- DECLARE @code NVARCHAR(20) = 'A-01-1';
     SELECT * FROM (
@@ -360,7 +360,7 @@ class SlotModel {
   `;
     const params = [code];
     guardParams(params);
-    const { rows } = await db.query(toDialect(sql), params);
+    const { rows } = await query(toDialect(sql), params);
     return rows[0] || null; // SQL đã alias đầy đủ camelCase
   }
 
@@ -408,12 +408,12 @@ class SlotModel {
    * @param {Record<string, unknown>} slot domain object camelCase
    * @returns {Promise<Record<string, unknown> | null>}
    */
-  async insert(slot) {
+  async insert(slot, query = db.query) {
     const insert = buildInsert(TABLES.slots, slot, SLOT_COLUMNS);
     if (!insert) return null;
-    const { rows } = await db.query(insert.text, insert.values);
+    const { rows } = await query(insert.text, insert.values);
     if (!rows[0]) return null;
-    return this.byCode(rows[0].code);
+    return this.byCode(rows[0].code, query);
   }
 
   /**
@@ -466,19 +466,38 @@ class SlotModel {
    * @param {Record<string, unknown>} patch các field camelCase cần cập nhật
    * @returns {Promise<Record<string, unknown> | null>}
    */
-  async update(code, patch) {
+  async update(code, patch, query = db.query) {
     const update = buildUpdate(TABLES.slots, patch, 'code', code, SLOT_COLUMNS);
     if (!update) return null;
-    const { rows } = await db.query(update.text, update.values);
+    const { rows } = await query(update.text, update.values);
     if (!rows[0]) return null;
-    return this.byCode(rows[0].code);
+    return this.byCode(rows[0].code, query);
   }
 
-  /**
-   * Xóa toàn bộ kệ (chỉ dùng trong reset seed).
-   * @param {Function} [query] bộ query (mặc định db.query)
-   * @returns {Promise<void>}
-   */
+  async hasNonReturnedAllocation(code, query = db.query) {
+    const { rows } = await query(`
+      SELECT 1 AS found WHERE EXISTS (
+        SELECT 1 FROM ${TABLES.allocation}
+        WHERE slot_code = ? AND closed_at IS NULL AND status <> 'RETURNED'
+      )
+    `, [code]);
+    return rows.length > 0;
+  }
+
+  async hasReferences(code, query = db.query) {
+    const { rows } = await query(`
+      SELECT 1 AS found WHERE EXISTS (
+        SELECT 1 FROM ${TABLES.allocation} WHERE slot_code = ?
+      ) OR EXISTS (
+        SELECT 1 FROM ${TABLES.movement} WHERE from_slot_code = ? OR to_slot_code = ?
+      ) OR EXISTS (
+        SELECT 1 FROM ${TABLES.outboundPick} WHERE slot_code = ?
+      )
+    `, [code, code, code, code]);
+    return rows.length > 0;
+  }
+
+  /** Xóa toàn bộ kệ trong reset seed. */
   async deleteAll(query = db.query) {
     const sql = `
     DELETE FROM whs_slots

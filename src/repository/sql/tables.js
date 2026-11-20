@@ -41,6 +41,8 @@ const TABLES = {
   emps: `${prefix}bas_emp`,
   userPass: `${prefix}sys_userpass`,
   goods: `${prefix}bas_goods`,
+  stBits: `${prefix}bas_st_bit`,
+  operLog: `${prefix}sys_oper_log`,
   order1: `${prefix}pur_order1`,
   order2: `${prefix}pur_order2`,
   notice1: `${prefix}pur_notice1`,

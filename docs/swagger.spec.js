@@ -816,6 +816,7 @@ function buildSwaggerSpec() {
         post: {
           tags: ['Slots'],
           summary: 'MANAGER tao ke moi',
+          description: 'Tạo WHS và bas_st_bit cùng transaction. GIF3 ánh xạ kho T8 101, st_bit_no dùng chung mã kệ và st_bit_name cố định Smart-Warehousing. modify_user là ADM nếu mã nhân viên bắt đầu TEST, còn lại dùng mã nhân viên. Kệ T8 có sẵn cùng kho được dùng lại. Mỗi lần ghi bas_st_bit đều ghi sys_oper_log trong cùng transaction với user_no, nội dung SQL chi tiết, GETDATE(), oper_type, smart-warehousing và w_bas_st_bit.',
           requestBody: JSON_BODY('#/components/schemas/CreateSlotDto'),
           responses: {
             201: {
@@ -826,6 +827,7 @@ function buildSwaggerSpec() {
             },
             400: ERROR_RESPONSE,
             403: ERROR_RESPONSE,
+            409: ERROR_RESPONSE,
           },
         },
       },
@@ -879,7 +881,10 @@ function buildSwaggerSpec() {
             'SHELF PERMISSION (Phase 2 2026-10-20, BE enforce): ' +
             'KEEPER chi duoc thao tac ke cua minh HOAC ke chua co chu so huu ' +
             '(keeper_emp_no NULL) — ke cua keeper khac tra ' +
-            '403 { error: { code: "no_permission" } }; locked/active chi MANAGER.',
+            '403 { error: { code: "no_permission" } }; locked/active chi MANAGER. ' +
+            'MANAGER có thể gửi code để đổi mã kệ chưa được sử dụng; đồng bộ WHS và bas_st_bit trong cùng transaction. ' +
+            'Code mới phải cùng kho. Kệ có tham chiếu WHS hoặc T8 trả 409 slot_in_use/t8_slot_in_use; mã đích đã tồn tại bị từ chối. ' +
+            'Chỉ thao tác đổi mã mới ghi vào T8 và sys_oper_log cùng transaction. Khóa, đầy, hoạt động và phân công thủ kho chỉ cập nhật WHS.',
           parameters: [
             {
               name: 'code',
@@ -897,6 +902,7 @@ function buildSwaggerSpec() {
             },
             400: ERROR_RESPONSE,
             403: ERROR_RESPONSE,
+            409: ERROR_RESPONSE,
             404: ERROR_RESPONSE,
           },
         },
@@ -1374,6 +1380,10 @@ function buildSwaggerSpec() {
         UpdateSlotDto: {
           type: 'object',
           properties: {
+            code: {
+              type: 'string', maxLength: 20, example: 'GIF3-A1-01-07',
+              description: 'MANAGER đổi mã kệ chưa có dữ liệu tham chiếu; phải cùng kho, định dạng kho-dãy-tầng-vị trí.',
+            },
             locked: { type: 'boolean', description: 'Khoa ke (chi ke trong)' },
             full: { type: 'boolean', description: 'Danh dau ke day' },
             active: { type: 'boolean', description: 'Vo hieu hoa / kich hoat ke' },
