@@ -6,11 +6,7 @@ const { TABLES: t } = require('./tables');
 const OPER_TYPES = { insert: '新增行', update: '修改', delete: '删除行' };
 const LOG_COLUMNS = ['user_no', 'log_desc', 'modify_date', 'oper_type', 'win_desc', 'win_name'];
 
-// This creates readable audit text only. SQL writes always bind values as parameters.
-function literal(value) {
-    if (value == null) return 'NULL';
-    return `N'${String(value).replace(/'/g, "''")}'`;
-}
+const { literal } = require('../../util/sql-audit');
 
 async function insert({ employeeNo, tableName, operation, description }, query) {
     const operType = OPER_TYPES[operation];

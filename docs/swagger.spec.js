@@ -154,7 +154,10 @@ const ACTIVITY_SCHEMA = {
     slotCode: { type: 'string', nullable: true },
     qty: { type: 'number', nullable: true },
     unit: { type: 'string', nullable: true },
-    detail: { type: 'string', nullable: true },
+    detail: {
+      type: 'string', nullable: true,
+      description: 'Log mới chứa mô tả SQL và thông tin đối chiếu dạng văn bản. FE hiển thị như text; log lịch sử có thể là JSON hoặc văn bản cũ. Giá trị mật khẩu được che.',
+    },
   },
 };
 

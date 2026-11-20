@@ -44,6 +44,7 @@ const { err, genId, shared } = require('./shared');
 const { toApiLot } = require('./mappers');
 const { createWorkerLogger } = require('../util/worker/logger');
 const db = require('../config/db');
+const audit = require('../util/sql-audit');
 const OutboundRepository = require('../repository/sql/outbound.repository');
 const { publishOutboundRevision } = require('../util/worker/outbound-revision');
 const logger = createWorkerLogger('lot-service');
@@ -158,13 +159,15 @@ class LotServices {
     // INSERT mới hoặc MERGE vào allocation active cùng (po_id, slot_code).
     const existing = preExisting;
     let allocationId;
+    let activityDetail;
     if (existing) {
       // Merge: cộng dồn số lượng, KHÔNG insert duplicate.
       const merged = await LotRepository.increaseAllocationQty(existing.id, qty);
       if (!merged) err('not_found', 404);
       allocationId = existing.id;
+      activityDetail = `UPDATE whs_slot_allocation SET allocated_qty = allocated_qty + ${audit.literal(qty)} WHERE id = ${audit.literal(existing.id)} AND closed_at IS NULL;`;
     } else {
-      const inserted = await LotRepository.insertAllocation({
+      const allocationValues = {
         id: genId('lot'),
         po_id: poId,
         goods_no: poLine.goodsNo,
@@ -183,9 +186,11 @@ class LotServices {
         allocated_by_emp_no: actor.id,
         allocated_at: now,
         closed_at: null,
-      });
+      };
+      const inserted = await LotRepository.insertAllocation(allocationValues);
       if (!inserted) err('not_found', 404);
       allocationId = inserted.id;
+      activityDetail = audit.insert('whs_slot_allocation', allocationValues);
     }
 
     // Receipt sync chạy nền qua queue (worker riêng) — API không chờ.
@@ -204,8 +209,10 @@ class LotServices {
 
     // Sync giờ chạy async trong worker — tại thời điểm assign KHÔNG có
     // receipt nào (job mới tạo mapping sau đó) nên noticeDetailId = null.
-    const detailParts = [`Dòng PO ${poId}`];
-    if (dto.note) detailParts.push(dto.note);
+    const detailParts = [
+      activityDetail,
+      audit.context({ po_number: poLine.poNumber, unit: poLine.unitNo, note: dto.note }),
+    ];
     await shared.logActivity({
       userId: actor.id,
       userName: actor.name,
@@ -217,7 +224,7 @@ class LotServices {
       slotCode: dto.slotCode,
       qty,
       unit: poLine.unitNo,
-      detail: detailParts.join(' · '),
+      detail: detailParts.join('\n'),
     });
     return toApiLot(result);
   }
@@ -613,27 +620,28 @@ class LotServices {
    * @param {string} reason lý do user nhập (đã trim)
    * @param {Record<string, unknown>} row allocation WHS đã re-read trong tx
    * @param {Record<string, unknown>[]} receipts mapping sắp release
-   * @returns {string} JSON string
+   * @returns {string} Mô tả SQL và dữ liệu đối chiếu trước khi hoàn tác
    */
-  #buildUndoActivityDetail(reason, row, receipts) {
-    return JSON.stringify({
-      reason,
-      allocation: {
-        id: row.id,
-        poId: row.poId,
-        goodsNo: row.goodsNo,
-        slotCode: row.slotCode,
-        allocatedQty: row.allocatedQty,
-        lotNo: row.lotNo,
-        allocatedByEmpNo: row.allocatedByEmpNo,
-        allocatedAt: row.allocatedAt,
-      },
-      releasedReceipts: receipts.map((r) => ({
-        noticeDetailId: r.noticeDetailId,
-        receivedQty: r.receivedQty,
-        lotNo: r.lotNo,
-      })),
-    });
+  #buildUndoActivityDetail(reason, row, receipts, actorId) {
+    const snapshot = {
+      reason, allocation_id: row.id, po_id: row.poId, goods_no: row.goodsNo,
+      slot_code: row.slotCode, allocated_qty: row.allocatedQty, lot_no: row.lotNo,
+      allocated_by_emp_no: row.allocatedByEmpNo, allocated_at: row.allocatedAt,
+    };
+    const receiptDetails = receipts.map((receipt, index) => audit.context({
+      [`receipt_${index + 1}_notice_detail_id`]: receipt.noticeDetailId,
+      [`receipt_${index + 1}_received_qty`]: receipt.receivedQty,
+      [`receipt_${index + 1}_lot_no`]: receipt.lotNo,
+    }));
+    return [
+      audit.update('whs_reconcile_issue', {
+        status: 'RESOLVED', resolved_by_emp_no: actorId,
+        note: `Hoàn tác gán kệ — ${reason}`.slice(0, 500),
+      }, { allocation_id: row.id, status: 'OPEN' }),
+      audit.remove('whs_allocation_receipt', { allocation_id: row.id }),
+      audit.remove('whs_slot_allocation', { id: row.id }),
+      audit.context(snapshot), ...receiptDetails,
+    ].join('\n');
   }
 
   /**
@@ -759,7 +767,7 @@ class LotServices {
           slotCode: row.slotCode,
           qty: row.allocatedQty, // allocated_qty TRƯỚC khi undo (#7)
           unit: display.unit,
-          detail: this.#buildUndoActivityDetail(reason, row, receipts),
+          detail: this.#buildUndoActivityDetail(reason, row, receipts, actor.id),
         },
         txQuery
       );

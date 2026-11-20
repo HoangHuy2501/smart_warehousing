@@ -1366,7 +1366,7 @@ class LotModel {
     const params = [id];
     guardParams(params);
     const { rows } = await query(toDialect(sql), params);
-    return rows || null;
+    return rows[0] || null;
   }
 
   /**
