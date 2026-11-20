@@ -179,7 +179,9 @@ Worker đăng ký lịch BullMQ cho queue `iqc-sync` và quét các allocation
 việc chạy, retry và ghi log. Service quyết định nghiệp vụ và cập nhật WHS
 trong transaction. Repository đọc T8 qua `pur_notice2.id` và khớp đủ sáu trường
 `sheet_no`, `sheet_id`, `pur_no`, `pur_id`, `goods_no`, `made_lot` trên
-`v_pur_notice_detail`.
+`v_pur_notice_detail`. Worker chỉ lấy dòng có `sheet_sta1 <> '0'` và
+`create_user <> 'ADM'`. Phiếu chưa duyệt hoặc do ADM tạo giữ trạng thái
+`WAITING_IQC`.
 
 - Với FAIL, cả `pro_result = 0` (Rejected) và `2` (Specially procured) đều
   tính lượng nhận và trả từ `return_qty`. Kết quả IQC vẫn lưu theo mã gốc
