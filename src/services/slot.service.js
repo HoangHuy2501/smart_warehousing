@@ -51,13 +51,45 @@ async function checkT8Slot(code, stNo, query) {
   return rows.length === 1;
 }
 
-async function syncT8Slot(slot, actorId, query) {
+function t8ModifyUser(actor) {
+  const empNo = String(actor.employeeCode ?? actor.id).trim();
+  return empNo.slice(0, 4).toUpperCase() === 'TEST' ? 'ADM' : empNo;
+}
+
+function slotFields(dto) {
+  const limits = { warehouse: 20, row: 5, floor: 2, position: 2 };
+  const fields = {};
+  for (const [key, limit] of Object.entries(limits)) {
+    const value = dto[key];
+    if (!['string', 'number'].includes(typeof value)) err('slot_invalid');
+    fields[key] = String(value).trim().toUpperCase();
+    if (!fields[key] || fields[key].length > limit || fields[key].includes('-')) err('slot_invalid');
+  }
+  const code = `${fields.warehouse}-${fields.row}-${fields.floor}-${fields.position}`;
+  if (code.length > 20) err('slot_code_too_long');
+  return { code, ...fields };
+}
+
+async function createT8Slot(slot, actor, query) {
   if (db.getMode() === 'memory') return;
   const stNo = warehouseNumber(slot);
   if (await checkT8Slot(slot.code, stNo, query)) {
-    await T8Slots.update(slot, stNo, actorId, query);
+    await T8Slots.rename(slot.code, slot.code, stNo, t8ModifyUser(actor), query);
   } else {
-    await T8Slots.insert(slot, stNo, actorId, query);
+    await T8Slots.insert(slot, stNo, t8ModifyUser(actor), query);
+  }
+}
+
+async function renameT8Slot(oldSlot, newSlot, actor, query) {
+  if (db.getMode() === 'memory') return;
+  const stNo = warehouseNumber(oldSlot);
+  const exists = await checkT8Slot(oldSlot.code, stNo, query);
+  if ((await T8Slots.find(newSlot.code, query)).length) err('t8_slot_conflict', 409);
+  if (await T8Slots.hasReferences(stNo, oldSlot.code, query)) err('t8_slot_in_use', 409);
+  if (exists) {
+    await T8Slots.rename(oldSlot.code, newSlot.code, stNo, t8ModifyUser(actor), query);
+  } else {
+    await T8Slots.insert(newSlot, stNo, t8ModifyUser(actor), query);
   }
 }
 
@@ -70,16 +102,7 @@ class SlotServices {
   async createSlot(dto) {
     const actor = await shared.getActor(dto.actorId);
     if (actor.role !== 'MANAGER') err('no_permission', 403);
-    const limits = { warehouse: 20, row: 5, floor: 2, position: 2 };
-    const fields = {};
-    for (const [key, limit] of Object.entries(limits)) {
-      const value = dto[key];
-      if (!['string', 'number'].includes(typeof value)) err('slot_invalid');
-      fields[key] = String(value).trim().toUpperCase();
-      if (!fields[key] || fields[key].length > limit) err('slot_invalid');
-    }
-    const code = `${fields.warehouse}-${fields.row}-${fields.floor}-${fields.position}`;
-    if (code.length > 20) err('slot_code_too_long');
+    const { code, ...fields } = slotFields(dto);
 
     try {
       const inserted = await db.withTransaction(async (query) => {
@@ -88,7 +111,7 @@ class SlotServices {
         const slot = await SlotRepository.insert({
           code, ...fields, keeperId: null, locked: false, full: false, active: true,
         }, query);
-        await syncT8Slot(slot, actor.id, query);
+        await createT8Slot(slot, actor, query);
         await shared.logActivity({
           userId: actor.id, userName: actor.name, actionKey: 'actCreateSlot', slotCode: code,
         }, query);
@@ -114,30 +137,24 @@ class SlotServices {
     if (actor.role !== 'MANAGER') err('no_permission', 403);
     // Fallback hồ sơ test áp tại service để tên thủ kho test hiển thị
     // đúng ngay cả khi t8_bas_emp chưa có dữ liệu thật.
-    if (!Array.isArray(dto.codes) || dto.codes.some((code) =>
-      typeof code !== 'string' || !code || code.length > 20)) err('slot_invalid');
     const accounts = (await AccountsRepository.list()).map(withTestProfile);
     const nameOf = (empNo) => {
       if (!empNo) return 'Chưa có thủ kho';
       const found = accounts.find((account) => account.id === empNo);
       return found ? found.name : empNo;
     };
-    await db.withTransaction(async (query) => {
-      for (const code of [...new Set(dto.codes)].sort()) {
-        await lockSlot(code, query);
-        const slot = await SlotRepository.byCode(code, query);
-        if (!slot) continue;
-        const updated = await SlotRepository.update(code, { keeperId: dto.keeperId || null }, query);
-        await syncT8Slot(updated, actor.id, query);
-        await shared.logActivity({
-          userId: actor.id,
-          userName: actor.name,
-          actionKey: dto.keeperId ? 'actAssignKeeper' : 'actClearKeeper',
-          slotCode: code,
-          detail: `Trước: ${nameOf(slot.keeperId)} → Sau: ${nameOf(dto.keeperId)}`,
-        }, query);
-      }
-    });
+    for (const code of dto.codes) {
+      const slot = await SlotRepository.byCode(code);
+      if (!slot) continue;
+      await SlotRepository.update(code, { keeperId: dto.keeperId || null });
+      await shared.logActivity({
+        userId: actor.id,
+        userName: actor.name,
+        actionKey: dto.keeperId ? 'actAssignKeeper' : 'actClearKeeper',
+        slotCode: code,
+        detail: `Trước: ${nameOf(slot.keeperId)} → Sau: ${nameOf(dto.keeperId)}`,
+      });
+    }
   }
 
   /**
@@ -162,53 +179,53 @@ class SlotServices {
       if (typeof dto[key] !== 'boolean') err('slot_invalid');
       patch[key] = dto[key];
     }
-    if ((patch.locked !== undefined || patch.active !== undefined) && actor.role !== 'MANAGER') {
+    let renamed;
+    if (dto.code !== undefined) {
+      if (typeof dto.code !== 'string') err('slot_invalid');
+      const parts = dto.code.trim().split('-');
+      if (parts.length !== 4) err('slot_invalid');
+      renamed = slotFields({ warehouse: parts[0], row: parts[1], floor: parts[2], position: parts[3] });
+    }
+    if ((renamed || patch.locked !== undefined || patch.active !== undefined) && actor.role !== 'MANAGER') {
       err('no_permission', 403);
     }
-    await db.withTransaction(async (query) => {
-      await lockSlot(code, query);
-      const slot = await SlotRepository.byCode(code, query);
-      if (!slot) err('not_found', 404);
-      if (patch.full !== undefined && !shared.canAccessSlot(actor, slot)) err('no_permission', 403);
-      if (patch.active === false && await SlotRepository.hasNonReturnedAllocation(code, query)) {
-        err('cannot_deactivate');
-      }
-      if (!Object.keys(patch).length) return;
-      const updated = await SlotRepository.update(code, patch, query);
-      await syncT8Slot(updated, actor.id, query);
-
-      const actions = {
-        locked: ['actUnlockSlot', 'actLockSlot'],
-        full: ['actUnfullSlot', 'actFullSlot'],
-        active: ['actDeactivateSlot', 'actActivateSlot'],
-      };
-      for (const key of Object.keys(patch)) {
-        await shared.logActivity({
-          userId: actor.id, userName: actor.name,
-          actionKey: actions[key][Number(patch[key])], slotCode: code,
-        }, query);
-      }
-    });
-  }
-
-  async deleteSlot(code, actorId) {
-    const actor = await shared.getActor(actorId);
-    if (actor.role !== 'MANAGER') err('no_permission', 403);
     try {
       await db.withTransaction(async (query) => {
-        await lockSlot(code, query);
+        for (const lockedCode of [...new Set([code, renamed?.code].filter(Boolean))].sort()) {
+          await lockSlot(lockedCode, query);
+        }
         const slot = await SlotRepository.byCode(code, query);
         if (!slot) err('not_found', 404);
-        if (await SlotRepository.hasReferences(code, query)) err('slot_in_use', 409);
-        if (db.getMode() !== 'memory') {
-          const stNo = warehouseNumber(slot);
-          await checkT8Slot(code, stNo, query);
-          if (await T8Slots.hasReferences(stNo, code, query)) err('t8_slot_in_use', 409);
-          await T8Slots.remove(stNo, code, query);
+        if (patch.full !== undefined && !shared.canAccessSlot(actor, slot)) err('no_permission', 403);
+        if (patch.active === false && await SlotRepository.hasNonReturnedAllocation(code, query)) {
+          err('cannot_deactivate');
         }
-        await SlotRepository.deleteByCode(code, query);
+        const changingCode = renamed && renamed.code !== slot.code;
+        if (changingCode) {
+          if (renamed.warehouse !== slot.warehouse) err('slot_warehouse_change_not_allowed', 409);
+          if (await SlotRepository.byCode(renamed.code, query)) err('code_exists');
+          if (await SlotRepository.hasReferences(code, query)) err('slot_in_use', 409);
+          await renameT8Slot(slot, { ...slot, ...renamed }, actor, query);
+          Object.assign(patch, renamed);
+        }
+        if (!Object.keys(patch).length) return;
+        await SlotRepository.update(code, patch, query);
+
+        const actions = {
+          locked: ['actUnlockSlot', 'actLockSlot'],
+          full: ['actUnfullSlot', 'actFullSlot'],
+          active: ['actDeactivateSlot', 'actActivateSlot'],
+        };
+        for (const key of ['locked', 'full', 'active']) {
+          if (patch[key] === undefined) continue;
+          await shared.logActivity({
+            userId: actor.id, userName: actor.name,
+            actionKey: actions[key][Number(patch[key])], slotCode: renamed?.code || code,
+          }, query);
+        }
       });
     } catch (error) {
+      if ([2601, 2627].includes(error.number) || error.code === '23505') err('code_exists');
       if (error.number === 547 || error.code === '23503') err('slot_in_use', 409);
       throw error;
     }

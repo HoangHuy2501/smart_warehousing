@@ -497,10 +497,6 @@ class SlotModel {
     return rows.length > 0;
   }
 
-  async deleteByCode(code, query = db.query) {
-    await query(`DELETE FROM ${TABLES.slots} WHERE code = ?`, [code]);
-  }
-
   /** Xóa toàn bộ kệ trong reset seed. */
   async deleteAll(query = db.query) {
     const sql = `

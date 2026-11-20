@@ -983,6 +983,10 @@ function makeMemoryRepository() {
       async update(code, patch) {
         const row = findSlotRow(code);
         if (!row) return null;
+        for (const key of ['code', 'warehouse', 'floor', 'position']) {
+          if (patch[key] !== undefined) row[key] = patch[key];
+        }
+        if (patch.row !== undefined) row.slot_row = patch.row;
         if (patch.keeperId !== undefined) row.keeper_emp_no = patch.keeperId;
         if (patch.locked !== undefined) row.locked = patch.locked;
         if (patch.full !== undefined) row.is_full = patch.full;
@@ -996,9 +1000,6 @@ function makeMemoryRepository() {
       async hasReferences(code) {
         return data.allocations.some((row) => row.slot_code === code) ||
           data.movements.some((row) => row.from_slot_code === code || row.to_slot_code === code);
-      },
-      async deleteByCode(code) {
-        data.slots = data.slots.filter((row) => row.code !== code);
       },
       async deleteAll() {
         data.slots = [];

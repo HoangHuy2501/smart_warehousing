@@ -816,7 +816,7 @@ function buildSwaggerSpec() {
         post: {
           tags: ['Slots'],
           summary: 'MANAGER tao ke moi',
-          description: 'Tạo whs_slots và bas_st_bit trong cùng transaction. GIF3 ánh xạ sang kho T8 101; st_bit_no dùng cùng mã kệ. Kệ đã tồn tại riêng trên T8 được dùng lại khi khớp kho. Lỗi đồng bộ sẽ rollback cả hai bảng. Kho chưa có ánh xạ trả 409 t8_warehouse_unmapped.',
+          description: 'Tạo WHS và bas_st_bit cùng transaction. GIF3 ánh xạ kho T8 101, st_bit_no dùng chung mã kệ và st_bit_name cố định Smart-Warehousing. modify_user là ADM nếu mã nhân viên bắt đầu TEST, còn lại dùng mã nhân viên. Kệ T8 có sẵn cùng kho được dùng lại.',
           requestBody: JSON_BODY('#/components/schemas/CreateSlotDto'),
           responses: {
             201: {
@@ -874,22 +874,6 @@ function buildSwaggerSpec() {
         },
       },
       '/api/warehouse/slots/{code}': {
-        delete: {
-          tags: ['Slots'],
-          summary: 'MANAGER xóa kệ khỏi WHS và T8',
-          description: 'Xóa trong cùng transaction. Kệ được tham chiếu bởi allocation, lịch sử di chuyển, lượt xuất hoặc bas_goods/pur_in2/scm_out2 bị chặn với 409 slot_in_use hoặc t8_slot_in_use.',
-          parameters: [{
-            name: 'code', in: 'path', required: true, schema: { type: 'string' },
-          }],
-          responses: {
-            200: { description: 'Đã xóa cả hai bảng', content: {
-              'application/json': { schema: { $ref: '#/components/schemas/Ok' } },
-            } },
-            403: ERROR_RESPONSE,
-            404: ERROR_RESPONSE,
-            409: ERROR_RESPONSE,
-          },
-        },
         patch: {
           tags: ['Slots'],
           summary: 'Cap nhat trang thai ke (locked / full / active)',
@@ -898,8 +882,9 @@ function buildSwaggerSpec() {
             'KEEPER chi duoc thao tac ke cua minh HOAC ke chua co chu so huu ' +
             '(keeper_emp_no NULL) — ke cua keeper khac tra ' +
             '403 { error: { code: "no_permission" } }; locked/active chi MANAGER. ' +
-            'Cập nhật whs_slots và bas_st_bit trong cùng transaction. active tương ứng act_sw 1/0. ' +
-            'locked/full và phân công thủ kho được lưu ở WHS; T8 cập nhật modify_date/modify_user và bổ sung dòng danh mục còn thiếu.',
+            'MANAGER có thể gửi code để đổi mã kệ chưa được sử dụng; đồng bộ WHS và bas_st_bit trong cùng transaction. ' +
+            'Code mới phải cùng kho. Kệ có tham chiếu WHS hoặc T8 trả 409 slot_in_use/t8_slot_in_use; mã đích đã tồn tại bị từ chối. ' +
+            'Chỉ thao tác đổi mã mới ghi vào T8. Khóa, đầy, hoạt động và phân công thủ kho chỉ cập nhật WHS.',
           parameters: [
             {
               name: 'code',
@@ -917,8 +902,8 @@ function buildSwaggerSpec() {
             },
             400: ERROR_RESPONSE,
             403: ERROR_RESPONSE,
-            404: ERROR_RESPONSE,
             409: ERROR_RESPONSE,
+            404: ERROR_RESPONSE,
           },
         },
       },
@@ -1395,6 +1380,10 @@ function buildSwaggerSpec() {
         UpdateSlotDto: {
           type: 'object',
           properties: {
+            code: {
+              type: 'string', maxLength: 20, example: 'GIF3-A1-01-07',
+              description: 'MANAGER đổi mã kệ chưa có dữ liệu tham chiếu; phải cùng kho, định dạng kho-dãy-tầng-vị trí.',
+            },
             locked: { type: 'boolean', description: 'Khoa ke (chi ke trong)' },
             full: { type: 'boolean', description: 'Danh dau ke day' },
             active: { type: 'boolean', description: 'Vo hieu hoa / kich hoat ke' },

@@ -24,20 +24,20 @@ async function find(code, query) {
     return rows;
 }
 
-async function insert(slot, stNo, actorId, query) {
+async function insert(slot, stNo, modifyUser, query) {
     await query(`
         INSERT INTO ${t.stBits}
             (st_no, st_bit_no, st_bit_name, act_sw, modify_date, modify_user, def06)
-        VALUES (?, ?, ?, ?, ?, ?, 0)
-    `, [stNo, slot.code, slot.code, slot.active ? '1' : '0', new Date(), actorId]);
+        VALUES (?, ?, ?, '1', ?, ?, 0)
+    `, [stNo, slot.code, 'Smart-Warehousing', new Date(), modifyUser]);
 }
 
-async function update(slot, stNo, actorId, query) {
+async function rename(oldCode, newCode, stNo, modifyUser, query) {
     await query(`
         UPDATE ${t.stBits}
-        SET act_sw = ?, modify_date = ?, modify_user = ?
+        SET st_bit_no = ?, st_bit_name = ?, modify_date = ?, modify_user = ?
         WHERE st_no = ? AND st_bit_no = ?
-    `, [slot.active ? '1' : '0', new Date(), actorId, stNo, slot.code]);
+    `, [newCode, 'Smart-Warehousing', new Date(), modifyUser, stNo, oldCode]);
 }
 
 async function hasReferences(stNo, code, query) {
@@ -53,8 +53,4 @@ async function hasReferences(stNo, code, query) {
     return rows.length > 0;
 }
 
-async function remove(stNo, code, query) {
-    await query(`DELETE FROM ${t.stBits} WHERE st_no = ? AND st_bit_no = ?`, [stNo, code]);
-}
-
-module.exports = { lock, find, insert, update, hasReferences, remove };
+module.exports = { lock, find, insert, rename, hasReferences };
