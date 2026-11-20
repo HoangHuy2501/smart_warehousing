@@ -1,6 +1,7 @@
 'use strict';
 
 const db = require('../config/db');
+const audit = require('../util/sql-audit');
 const repo = require('../repository/sql/outbound.repository');
 const { acquireAllocationLock } = require('../repository/sql/receipt-sync.repository');
 const { err, shared } = require('./shared');
@@ -100,6 +101,16 @@ async function plan(source) {
 }
 
 function logOutboundPick(line, pick, actionKey, userId, qty, actedAt, detail, tx) {
+    const statements = actionKey === 'OUTBOUND_PICK_CONFIRMED' ? [
+        audit.update('whs_slot_allocation', { qty_in_stock: detail.stockAfter }, { id: pick.allocation_id }),
+        audit.update('whs_outbound_pick', {
+            picked_qty: qty, picked_at: actedAt, picked_by_emp_no: userId,
+        }, { id: String(pick.id), picked_at: null }),
+    ] : [
+        audit.update('whs_outbound_line', {
+            status: 'COMPLETED', completed_at: detail.completedAt,
+        }, { scm_out_detail_id: line.scm_out_detail_id }),
+    ];
     return shared.logActivity({
         userId,
         actedAt,
@@ -109,7 +120,7 @@ function logOutboundPick(line, pick, actionKey, userId, qty, actedAt, detail, tx
         slotCode: pick.slot_code,
         qty: Number(qty),
         unit: line.stock_unit || line.unit_no,
-        detail: JSON.stringify({
+        detail: [...statements, audit.context({
             sheetNo: line.sheet_no,
             sourceDetailId: line.scm_out_detail_id,
             pickId: String(pick.id),
@@ -124,7 +135,7 @@ function logOutboundPick(line, pick, actionKey, userId, qty, actedAt, detail, tx
             plannedQty: pick.planned,
             pickedQty: qty,
             ...detail,
-        }),
+        })].join('\n'),
     }, tx);
 }
 

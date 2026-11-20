@@ -35,4 +35,8 @@ test('IT can create and reset all roles with a password-free audit trail', async
   assert.equal(all.items.filter(({ actionKey }) => actionKey === 'ACCOUNT_CREATED').length, 3);
   assert.equal(all.items.filter(({ actionKey }) => actionKey === 'ACCOUNT_PASSWORD_RESET').length, 3);
   assert.doesNotMatch(JSON.stringify(all), /test-pass|changed-pass|manager-pass/);
+  for (const entry of all.items) {
+    assert.match(entry.detail, /^(INSERT INTO|UPDATE) whs_user_role/);
+    assert.match(entry.detail, /\[REDACTED\]/);
+  }
 });

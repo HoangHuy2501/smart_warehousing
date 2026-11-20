@@ -29,14 +29,11 @@ const AccountsRepository = require('../repository/sql/account.repository');
 /** @type {import('../repository/sql/activity.repository').ActivityModel} */
 const ActivityRepository = require('../repository/sql/activity.repository');
 
-/**
- * 2026-10-24 (user): whs_activity chỉ ghi log gán kệ — mọi action_key
- * ngoài danh sách này bị bỏ qua, không ghi vào DB.
- */
-// 2026-10-24 (user yêu cầu) whs_activity chỉ ghi log gán kệ; 2026-11-07
-// bổ sung UNDO_ASSIGN — Hoàn tác gán kệ là audit bắt buộc (#7 spec Undo).
 const { ACCOUNT_AUDIT_ACTIONS } = require('../config/account-audit');
-const ACTIVITY_LOG_KEYS = new Set(['actAssign', 'UNDO_ASSIGN', 'OUTBOUND_COMPLETE', 'OUTBOUND_PICK_CONFIRMED', ...ACCOUNT_AUDIT_ACTIONS]);
+const ACTIVITY_LOG_KEYS = new Set([
+  'actAssign', 'UNDO_ASSIGN', 'OUTBOUND_COMPLETE', 'OUTBOUND_PICK_CONFIRMED',
+  'actCreateSlot', 'actRenameSlot', ...ACCOUNT_AUDIT_ACTIONS,
+]);
 
 /** Ném lỗi business — controller/error.middleware sẽ đổi thành { error: { code, ... } }. */
 function err(code, httpStatus = 400) {

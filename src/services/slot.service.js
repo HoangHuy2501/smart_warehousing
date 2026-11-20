@@ -23,6 +23,7 @@
 const { err, shared, withTestProfile } = require('./shared');
 const { toApiSlot } = require('./mappers');
 const db = require('../config/db');
+const audit = require('../util/sql-audit');
 const T8Slots = require('../repository/sql/t8-slot.repository');
 const { t8WarehouseNumbers } = require('../config/warehouse.config');
 // @type cho từng require: module.exports repository bị swap theo DB_MODE
@@ -114,6 +115,11 @@ class SlotServices {
         await createT8Slot(slot, actor, query);
         await shared.logActivity({
           userId: actor.id, userName: actor.name, actionKey: 'actCreateSlot', slotCode: code,
+          detail: audit.insert('whs_slots', {
+            code, warehouse: fields.warehouse, slot_row: fields.row,
+            floor: fields.floor, position: fields.position,
+            keeper_emp_no: null, locked: false, is_full: false, active: true,
+          }),
         }, query);
         return slot;
       });
@@ -210,6 +216,18 @@ class SlotServices {
         }
         if (!Object.keys(patch).length) return;
         await SlotRepository.update(code, patch, query);
+        if (changingCode) {
+          await shared.logActivity({
+            userId: actor.id, userName: actor.name, actionKey: 'actRenameSlot',
+            slotCode: renamed.code,
+            detail: audit.update('whs_slots', {
+              code: patch.code, warehouse: patch.warehouse, slot_row: patch.row,
+              floor: patch.floor, position: patch.position,
+              locked: patch.locked, is_full: patch.full, active: patch.active,
+            }, { code }),
+          }, query);
+        }
+
 
         const actions = {
           locked: ['actUnlockSlot', 'actLockSlot'],

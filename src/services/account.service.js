@@ -30,6 +30,7 @@
 'use strict';
 
 const db = require('../config/db');
+const audit = require('../util/sql-audit');
 const { err, shared, withTestProfile } = require('./shared');
 const { toApiAccount, toApiSlot } = require('./mappers');
 // @type cho từng require: module.exports repository bị swap theo DB_MODE
@@ -99,7 +100,12 @@ class AccountServices {
       await shared.logActivity({
         userId: actor.id,
         actionKey: 'ACCOUNT_CREATED',
-        detail: JSON.stringify({ employeeCode: employee.employeeCode, role, actorRole: actor.role }),
+        detail: [
+          audit.insert('whs_user_role', {
+            emp_no: employee.employeeCode, role, locked: false, active: true, password: '[REDACTED]',
+          }),
+          audit.context({ actor_role: actor.role, password_note: 'Giá trị mật khẩu đã được ẩn' }),
+        ].join('\n'),
       }, tx);
     });
     return toApiAccount({ ...employee, id: employee.employeeCode, role, locked: false });
@@ -205,7 +211,10 @@ class AccountServices {
       await shared.logActivity({
         userId: actor.id,
         actionKey: 'ACCOUNT_PASSWORD_RESET',
-        detail: JSON.stringify({ employeeCode: key.emp_no, role: key.role, actorRole: actor.role }),
+        detail: [
+          audit.update('whs_user_role', { password: '[REDACTED]' }, { emp_no: key.emp_no }),
+          audit.context({ role: key.role, actor_role: actor.role, password_note: 'Giá trị mật khẩu đã được ẩn' }),
+        ].join('\n'),
       }, tx);
     });
   }
