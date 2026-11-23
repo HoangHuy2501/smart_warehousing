@@ -286,7 +286,10 @@ CREATE TABLE dbo.whs_slot_allocation (
   allocated_by_emp_no NVARCHAR(20)  NOT NULL,
   allocated_at        DATETIME2     NOT NULL,
   closed_at           DATETIME2     NULL,
-  CONSTRAINT CK_whs_alloc_qty CHECK (allocated_qty > 0)
+  CONSTRAINT CK_whs_alloc_qty CHECK (allocated_qty > 0),
+  CONSTRAINT CK_whs_alloc_status CHECK (
+    status IN ('WAITING_IQC', 'WAITING_STOCK', 'SEND_STOCK', 'IN_STOCK', 'RETURNED', 'AOD_PENDING')
+  )
 );
 GO
 
