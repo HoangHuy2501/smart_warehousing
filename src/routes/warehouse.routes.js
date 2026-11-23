@@ -94,6 +94,14 @@ router.post(
 );
 
 router.post(
+  '/lots/:id/t8-receipt',
+  requireAuth,
+  requireWarehouseOperator,
+  requireBodyFields(['slotCode']),
+  asyncHandler(controller.sendStock)
+);
+
+router.post(
   '/lots/:id/move',
   requireAuth,
   requireWarehouseOperator,

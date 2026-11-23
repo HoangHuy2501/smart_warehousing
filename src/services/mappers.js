@@ -88,7 +88,7 @@ function toApiLot(lot) {
     assignedAt: opt(lot.assignedAt),
     status: lot.status,
     statusRecordedAt: lot.statusRecordedAt ?? (lot.status === 'WAITING_IQC' && !lot.iqcDecision ? lot.assignedAt : null) ?? null,
-    waitingStockSince: lot.status === 'WAITING_STOCK' ? (lot.statusRecordedAt ?? null) : null,
+    waitingStockSince: ['WAITING_STOCK', 'SEND_STOCK'].includes(lot.status) ? (lot.statusRecordedAt ?? null) : null,
     iqcDecision: opt(lot.iqcDecision),
     hasWarning: opt(lot.hasWarning),
     qtyInStock: opt(lot.qtyInStock),

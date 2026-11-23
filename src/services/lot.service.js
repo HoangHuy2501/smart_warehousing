@@ -425,6 +425,7 @@ class LotServices {
         const fresh = await ReceiptSyncRepository.findAllocationForSync(lot.id, txQuery);
         if (!fresh || fresh.closedAt) err('not_found', 404);
         if (fresh.slotCode !== lot.shelfCode) err('lot_slot_changed', 409);
+        if (fresh.status === 'SEND_STOCK') err('lot_awaiting_t8_approval', 409);
         const destination = await LotRepository.findActiveAllocationByPoAndSlot(lot.poId, dto.targetSlotCode, txQuery);
         if (destination) err('move_target_has_po', 409);
         if (target.full) err('slot_full');
