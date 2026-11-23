@@ -16,6 +16,7 @@ for (const scenario of [
     { name: 'đã duyệt đủ', imported: 100, draft: 0 },
     { name: 'đã có phiếu nháp đủ', imported: 0, draft: 100 },
     { name: 'tạo nháp phần còn thiếu', imported: 30, draft: 20, expected: '50.00000000' },
+    { name: 'ghi nối vào phiếu nháp cùng tạm nhập', imported: 0, draft: 40, expected: '60.00000000', reuse: true },
     { name: 'bấm lại sau khi gửi', status: 'SEND_STOCK' },
 ]) {
     test(scenario.name, async (t) => {
@@ -28,7 +29,7 @@ for (const scenario of [
         t.mock.method(locks, 'acquireAllocationLock', async () => {});
         t.mock.method(locks, 'acquireNoticeLock', async () => {});
         t.mock.method(locks, 'findAllocationForSync', async () => ({
-            slotCode: 'A1-1', status: scenario.status || 'WAITING_STOCK',
+            slotCode: 'A1-1', poId: 8, goodsNo: 'GOODS', status: scenario.status || 'WAITING_STOCK',
         }));
         t.mock.method(allocations, 'findReceiptsForAllocation', async () => [{
             noticeDetailId: 1, qtyInStock: 100, lotNo: 'LOT', iqcDecision: 'PASS',
@@ -37,12 +38,17 @@ for (const scenario of [
             notice_id: 1, lot_no: 'LOT', imported_qty: scenario.imported,
             required_qty: 100, unresolved_count: 0,
         }]);
-        t.mock.method(t8, 'findSource', async () => ({
-            notice_no: 'PN', notice_id: 2, pur_no: 'PO', pur_id: 3, goods_no: 'GOODS',
-            made_lot: 'LOT', sheet_qty: 100, return_qty: 0, match_count: 1, adj_result: '1',
-            draft_qty: scenario.draft, su_no: 'SU', st_no: '101',
-            sheet_pri: 500, unit_rate: 1, pri_dis: 1,
-        }));
+        t.mock.method(t8, 'findSource', async (id, poId, goodsNo) => {
+            assert.deepEqual([id, poId, goodsNo], [1, 8, 'GOODS']);
+            return {
+                notice_no: 'PN', notice_id: 2, pur_no: 'PO', pur_id: 3, goods_no: 'GOODS',
+                made_lot: 'LOT', sheet_qty: 100, return_qty: 0, match_count: 1, adj_result: '1',
+                draft_qty: scenario.draft, su_no: 'SU', st_no: '101',
+                sheet_pri: 500, unit_rate: 1, pri_dis: 1,
+            };
+        });
+        t.mock.method(t8, 'findOpenDraft', async () => scenario.reuse ? ['PIGI0001'] : []);
+        t.mock.method(t8, 'nextLineId', async () => 7);
         t.mock.method(t8, 'hasSlot', async () => true);
         t.mock.method(t8, 'findCreator', async () => ({ user_no: 'EMP', emp_no: null }));
         t.mock.method(t8, 'reserveSheetNumber', async () => 'PSMGI261123001');
@@ -52,13 +58,16 @@ for (const scenario of [
 
         const result = await send('LOT-ID', { actorId: 'EMP', slotCode: 'A1-1' });
         assert.equal(result.status, 'SEND_STOCK');
-        assert.deepEqual(result.sheetNos, scenario.expected ? ['PSMGI261123001'] : []);
+        assert.deepEqual(result.sheetNos, scenario.reuse ? ['PIGI0001'] : scenario.expected ? ['PSMGI261123001'] : []);
         assert.equal(update.mock.callCount(), scenario.status ? 0 : 1);
-        assert.equal(header.mock.callCount(), scenario.expected ? 1 : 0);
+        assert.equal(header.mock.callCount(), scenario.expected && !scenario.reuse ? 1 : 0);
         assert.equal(line.mock.callCount(), scenario.expected ? 1 : 0);
-        if (scenario.expected) {
+        if (scenario.expected && !scenario.reuse) {
             assert.equal(header.mock.calls[0].arguments[0].sheet_sta, '0');
             assert.equal(header.mock.calls[0].arguments[0].rem, 'Smart-Warehousing');
+        }
+        if (scenario.expected) {
+            assert.equal(line.mock.calls[0].arguments[0].sheet_id, scenario.reuse ? 7 : 1);
             assert.equal(line.mock.calls[0].arguments[0].sheet_qty, scenario.expected);
             assert.equal(line.mock.calls[0].arguments[0].st_bit_no, 'A1-1');
         }

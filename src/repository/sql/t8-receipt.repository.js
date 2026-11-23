@@ -4,7 +4,7 @@ const { TABLES: t } = require('./tables');
 const audit = require('../../util/sql-audit');
 const operationLog = require('./t8-operation-log.repository');
 
-async function findSource(noticeId, query) {
+async function findSource(noticeId, poId, goodsNo, query) {
     const { rows } = await query(`
         SELECT n.sheet_no AS notice_no, n.sheet_id AS notice_id,
                n.pur_no, n.pur_id, n.goods_no, n.unit_no, n.unit_rate, n.st_no,
@@ -14,6 +14,8 @@ async function findSource(noticeId, query) {
                COALESCE(drafts.qty, 0) AS draft_qty
         FROM ${t.notice2} n
         JOIN ${t.notice1} h ON h.sheet_no = n.sheet_no
+        JOIN ${t.order2} po ON po.id = ? AND po.sheet_no = n.pur_no
+                           AND po.sheet_id = n.pur_id AND po.goods_no = n.goods_no
         CROSS APPLY (
             SELECT COUNT(*) AS match_count, MAX(i.adj_result) AS adj_result,
                    MAX(i.sheet_qty) AS sheet_qty, COALESCE(MAX(i.return_qty), 0) AS return_qty
@@ -35,8 +37,8 @@ async function findSource(noticeId, query) {
                   WHERE p.sheet_no = d.sheet_no AND p.sheet_sta = '0'
               )
         ) drafts
-        WHERE n.id = ?
-    `, [noticeId]);
+        WHERE n.id = ? AND n.goods_no = ?
+    `, [poId, noticeId, goodsNo]);
     return rows[0];
 }
 
@@ -56,6 +58,33 @@ async function hasSlot(warehouse, slotCode, query) {
         WHERE st_no = ? AND st_bit_no = ? AND act_sw = '1'
     `, [warehouse, slotCode]);
     return rows.length > 0;
+}
+
+async function findOpenDraft(noticeNo, supplier, query) {
+    const { rows } = await query(`
+        SELECT TOP (2) h.sheet_no
+        FROM ${t.in1} h WITH (UPDLOCK, HOLDLOCK)
+        WHERE h.sheet_sta = '0' AND h.sheet_type = 'PIGI' AND h.su_no = ?
+          AND EXISTS (
+              SELECT 1 FROM ${t.userPass} u
+              WHERE u.user_no = h.create_user AND u.user_name <> 'ADM'
+          )
+          AND EXISTS (
+              SELECT 1 FROM ${t.in2} d
+              WHERE d.sheet_no = h.sheet_no AND d.notice_no = ?
+          )
+        ORDER BY h.sheet_no
+    `, [supplier, noticeNo]);
+    return rows.map((row) => row.sheet_no);
+}
+
+async function nextLineId(sheetNo, query) {
+    const { rows } = await query(`
+        SELECT COALESCE(MAX(sheet_id), 0) + 1 AS next_id
+        FROM ${t.in2} WITH (UPDLOCK, HOLDLOCK)
+        WHERE sheet_no = CONVERT(varchar(20), ?)
+    `, [sheetNo]);
+    return rows[0].next_id;
 }
 
 async function reserveSheetNumber(query) {
@@ -88,7 +117,7 @@ async function insertRow(table, logicalName, values, employeeNo, query) {
 }
 
 module.exports = {
-    findSource, findCreator, hasSlot, reserveSheetNumber,
+    findSource, findCreator, hasSlot, reserveSheetNumber, findOpenDraft, nextLineId,
     insertHeader: (values, empNo, query) => insertRow(t.in1, 'pur_in1', values, empNo, query),
     insertLine: (values, empNo, query) => insertRow(t.in2, 'pur_in2', values, empNo, query),
 };

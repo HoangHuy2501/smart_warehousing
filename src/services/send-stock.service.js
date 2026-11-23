@@ -44,7 +44,7 @@ async function send(allocationId, { actorId, slotCode }) {
             for (const row of rows) coverage.set(Number(row.notice_id), row);
         }
 
-        const bySupplier = new Map();
+        const byNotice = new Map();
         for (const id of noticeIds) {
             const local = accepted.filter((r) => Number(r.noticeDetailId) === id);
             const row = coverage.get(id);
@@ -53,10 +53,9 @@ async function send(allocationId, { actorId, slotCode }) {
 
             const required = Number(row.required_qty);
             const imported = Number(row.imported_qty);
+            const source = await t8.findSource(id, allocation.poId, allocation.goodsNo, tx);
+            if (!source) err('t8_receipt_source_invalid', 409);
             if (imported >= required) continue;
-
-            const source = await t8.findSource(id, tx);
-            if (!source) err('lot_stock_unresolved', 409);
             const existing = imported + Number(source.draft_qty);
             if (existing + EPSILON >= required) continue;
 
@@ -71,7 +70,7 @@ async function send(allocationId, { actorId, slotCode }) {
             }
             if (!await t8.hasSlot(source.st_no, slotCode, tx)) err('t8_receipt_slot_invalid', 409);
 
-            const lines = bySupplier.get(source.su_no) || [];
+            const { lines } = byNotice.get(source.notice_no) || { lines: [] };
             lines.push({
                 notice_no: source.notice_no, notice_id: source.notice_id,
                 pur_no: source.pur_no, pur_id: source.pur_id, goods_no: source.goods_no,
@@ -81,32 +80,41 @@ async function send(allocationId, { actorId, slotCode }) {
                 cur_no: source.cur_no, inv_type: source.inv_type, rem: source.rem,
                 def06: source.sheet_qty, def14: source.def14, def15: source.def15, sheet_sta: '0',
             });
-            bySupplier.set(source.su_no, lines);
+            byNotice.set(source.notice_no, { supplier: source.su_no, lines });
         }
 
         const sheetNos = [];
-        if (bySupplier.size) {
-            const creator = await t8.findCreator(actor.id, tx);
-            if (!creator) err('t8_receipt_creator_invalid', 409);
-            for (const [su_no, lines] of bySupplier) {
-                const sheet_no = await t8.reserveSheetNumber(tx);
-                if (!sheet_no) err('t8_receipt_daily_limit', 409);
+        let creator;
+        for (const [noticeNo, { supplier, lines }] of byNotice) {
+            const drafts = await t8.findOpenDraft(noticeNo, supplier, tx);
+            if (drafts.length > 1) err('t8_receipt_multiple_drafts', 409);
+
+            let [sheetNo] = drafts;
+            let lineId = 1;
+            if (sheetNo) {
+                lineId = await t8.nextLineId(sheetNo, tx);
+            } else {
+                creator ??= await t8.findCreator(actor.id, tx);
+                if (!creator) err('t8_receipt_creator_invalid', 409);
+                sheetNo = await t8.reserveSheetNumber(tx);
+                if (!sheetNo) err('t8_receipt_daily_limit', 409);
                 await t8.insertHeader({
-                    sheet_type: 'PIGI', sheet_no, sheet_date: new Date(), su_no,
+                    sheet_type: 'PIGI', sheet_no: sheetNo, sheet_date: new Date(), su_no: supplier,
                     emp_no: creator.emp_no, create_user: creator.user_no,
                     rem: 'Smart-Warehousing', sheet_sta: '0', check_sta: '0',
                 }, actor.id, tx);
-                for (const [index, line] of lines.entries()) {
-                    await t8.insertLine({ sheet_no, sheet_id: index + 1, ...line }, actor.id, tx);
-                }
-                sheetNos.push(sheet_no);
             }
+            for (const line of lines) {
+                await t8.insertLine({ sheet_no: sheetNo, sheet_id: lineId++, ...line }, actor.id, tx);
+            }
+            sheetNos.push(sheetNo);
         }
 
-        await allocations.updateAllocationIqcSummary(allocationId, {
+        const updated = await allocations.updateAllocationIqcSummary(allocationId, {
             status: 'SEND_STOCK',
             status_recorded_at: new Date(),
         }, tx);
+        if (!updated) err('t8_receipt_allocation_update_failed', 409);
         return { allocationId, status: 'SEND_STOCK', sheetNos };
     });
 }
