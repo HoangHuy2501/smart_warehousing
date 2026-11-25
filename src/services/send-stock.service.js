@@ -1,6 +1,7 @@
 'use strict';
 
 const { createHash } = require('node:crypto');
+const { t8WarehouseNumbers } = require('../config/warehouse.config');
 const db = require('../config/db');
 const { err, shared } = require('./shared');
 const allocations = require('../repository/sql/iqc-sync.repository');
@@ -31,7 +32,7 @@ async function authorize(allocationId, actor, slotCode, tx) {
     if (allocation.slotCode !== slotCode) err('lot_slot_changed', 409);
     const slot = await slots.byCode(slotCode, tx);
     if (!slot || !shared.canAccessSlot(actor, slot)) err('no_permission', 403);
-    return allocation;
+    return { ...allocation, warehouse: slot.warehouse };
 }
 
 async function getActor(actorId, slotCode) {
@@ -53,11 +54,11 @@ async function getGroup(allocationId, actor, slotCode, tx, lockGroup) {
     }
     const members = [];
     for (const id of ids) {
-        const allocation = id === allocationId ? anchor : await locks.findAllocationForSync(id, tx);
+        let allocation = id === allocationId ? anchor : await locks.findAllocationForSync(id, tx);
         if (!allocation || allocation.closedAt || allocation.status !== 'WAITING_STOCK') {
             err('t8_receipt_preview_stale', 409);
         }
-        if (id !== allocationId) await authorize(id, actor, allocation.slotCode, tx);
+        if (id !== allocationId) allocation = await authorize(id, actor, allocation.slotCode, tx);
         const receipts = await allocations.findReceiptsForAllocation(id, tx);
         if (allocation.hasWarning || receipts.some((r) =>
             r.hasWarning || r.qtyInStock == null || !r.lotNo?.trim())) err('lot_stock_unresolved', 409);
@@ -91,6 +92,7 @@ async function planLines(members, tx, lockNotices) {
     const plannedByNotice = new Map();
     for (const { id: allocationId, allocation, included } of members) {
         const slotCode = allocation.slotCode;
+        const warehouse = t8WarehouseNumbers[allocation.warehouse] ?? null;
         const memberNoticeIds = [...new Set(included.map((r) => Number(r.noticeDetailId)))].sort((a, b) => a - b);
         for (const id of memberNoticeIds) {
             const local = included.filter((r) => Number(r.noticeDetailId) === id);
@@ -100,7 +102,7 @@ async function planLines(members, tx, lockNotices) {
 
             const required = Number(row.required_qty);
             const imported = Number(row.imported_qty);
-            const source = await t8.findSource(id, allocation.poId, allocation.goodsNo, slotCode, tx);
+            const source = await t8.findSource(id, allocation.poId, allocation.goodsNo, slotCode, warehouse, tx);
             if (!source) err('t8_receipt_source_invalid', 409);
             if (imported >= required) continue;
             const existing = imported + Number(source.draft_qty);
@@ -119,12 +121,13 @@ async function planLines(members, tx, lockNotices) {
             if (!source.su_no || !(source.sheet_pri > 0 && source.unit_rate > 0 && source.pri_dis > 0)) {
                 err('t8_receipt_source_invalid', 409);
             }
-            if (!await t8.hasSlot(source.st_no, slotCode, tx)) err('t8_receipt_slot_invalid', 409);
+            if (!warehouse) err('t8_warehouse_unmapped', 409);
+            if (!await t8.hasSlot(warehouse, slotCode, tx)) err('t8_receipt_slot_invalid', 409);
 
             const values = {
                 notice_no: source.notice_no, notice_id: source.notice_id,
                 pur_no: source.pur_no, pur_id: source.pur_id, goods_no: source.goods_no,
-                unit_no: source.unit_no, unit_rate: source.unit_rate, st_no: source.st_no,
+                unit_no: source.unit_no, unit_rate: source.unit_rate, st_no: warehouse,
                 st_bit_no: slotCode, made_lot: source.made_lot, sheet_qty: quantity.toFixed(8),
                 sheet_pri: source.sheet_pri, pri_dis: source.pri_dis, tax_sw: source.tax_sw,
                 cur_no: source.cur_no, inv_type: source.inv_type, rem: source.rem,
