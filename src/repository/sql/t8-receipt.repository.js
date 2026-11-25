@@ -20,7 +20,12 @@ async function findWaitingPeers(anchorId, query) {
     return rows.map((row) => row.id);
 }
 
-async function findSource(noticeId, poId, goodsNo, slotCode, warehouse, query) {
+function withoutWarehousePrefix(slotCode, warehouseCode) {
+    const prefix = warehouseCode + '-';
+    return slotCode.startsWith(prefix) ? slotCode.slice(prefix.length) : slotCode;
+}
+
+async function findSource(noticeId, poId, goodsNo, slotCode, warehouseCode, warehouse, query) {
     const { rows } = await query(`
         SELECT n.sheet_no AS notice_no, n.sheet_id AS notice_id,
                n.pur_no, n.pur_id, n.goods_no, n.unit_no, n.unit_rate,
@@ -43,7 +48,7 @@ async function findSource(noticeId, poId, goodsNo, slotCode, warehouse, query) {
         ) iqc
         CROSS APPLY (
             SELECT SUM(CASE WHEN p.sheet_sta = '0' THEN d.sheet_qty ELSE 0 END) AS draft_qty,
-                   SUM(CASE WHEN d.st_bit_no = ? AND d.st_no = ? THEN d.sheet_qty ELSE 0 END) AS slot_qty
+                   SUM(CASE WHEN d.st_bit_no IN (?, ?) AND d.st_no = ? THEN d.sheet_qty ELSE 0 END) AS slot_qty
             FROM ${t.in2} d
             JOIN ${t.in1} p ON p.sheet_no = d.sheet_no
             WHERE d.notice_no = n.sheet_no AND d.notice_id = n.sheet_id
@@ -56,7 +61,7 @@ async function findSource(noticeId, poId, goodsNo, slotCode, warehouse, query) {
               )
         ) existing
         WHERE n.id = ? AND n.goods_no = ?
-    `, [poId, slotCode, warehouse, noticeId, goodsNo]);
+    `, [poId, slotCode, withoutWarehousePrefix(slotCode, warehouseCode), warehouse, noticeId, goodsNo]);
     return rows[0];
 }
 
@@ -70,12 +75,16 @@ async function findCreator(empNo, query) {
     return rows[0];
 }
 
-async function hasSlot(warehouse, slotCode, query) {
+async function findActiveSlotCode(warehouse, slotCode, warehouseCode, query) {
+    const shortCode = withoutWarehousePrefix(slotCode, warehouseCode);
     const { rows } = await query(`
-        SELECT 1 AS found FROM ${t.stBits}
-        WHERE st_no = ? AND st_bit_no = ? AND act_sw = '1'
-    `, [warehouse, slotCode]);
-    return rows.length > 0;
+        SELECT TOP (1) st_bit_no
+        FROM ${t.stBits}
+        WHERE st_no = CONVERT(varchar(20), ?) AND act_sw = '1'
+          AND st_bit_no IN (CONVERT(varchar(20), ?), CONVERT(varchar(20), ?))
+        ORDER BY CASE WHEN st_bit_no = CONVERT(varchar(20), ?) THEN 0 ELSE 1 END
+    `, [warehouse, slotCode, shortCode, slotCode]);
+    return rows[0]?.st_bit_no?.trim();
 }
 
 async function findOpenDraft(noticeNo, supplier, query) {
@@ -135,7 +144,7 @@ async function insertRow(table, logicalName, values, employeeNo, query) {
 }
 
 module.exports = {
-    findWaitingPeers, findSource, findCreator, hasSlot, reserveSheetNumber, findOpenDraft, nextLineId,
+    findWaitingPeers, findSource, findCreator, findActiveSlotCode, reserveSheetNumber, findOpenDraft, nextLineId,
     insertHeader: (values, empNo, query) => insertRow(t.in1, 'pur_in1', values, empNo, query),
     insertLine: (values, empNo, query) => insertRow(t.in2, 'pur_in2', values, empNo, query),
 };
