@@ -47,7 +47,7 @@ for (const scenario of [
         let changed = false;
         t.mock.method(t8, 'findWaitingPeers', async () => []);
         t.mock.method(t8, 'findSource', async (id, poId, goodsNo, slotCode) => {
-            assert.deepEqual([id, poId, goodsNo, slotCode], [1, 8, 'GOODS', scenario.shortCode ?? 'A1-1']);
+            assert.deepEqual([id, poId, goodsNo, slotCode], [1, 8, 'GOODS', 'A1-1']);
             return {
                 notice_no: 'PN', notice_id: 2, pur_no: 'PO', pur_id: 3, goods_no: 'GOODS',
                 made_lot: 'LOT', sheet_qty: 100, return_qty: 0, match_count: 1, adj_result: '1',
@@ -57,7 +57,7 @@ for (const scenario of [
         });
         t.mock.method(t8, 'findOpenDraft', async () => scenario.reuse ? ['PIGI0001'] : []);
         t.mock.method(t8, 'nextLineId', async () => 7);
-        t.mock.method(t8, 'findActiveSlotCode', async (warehouse) => {
+        const findSlot = t.mock.method(t8, 'findActiveSlotCode', async (warehouse) => {
             assert.equal(warehouse, '101');
             return scenario.missingSlot ? undefined : scenario.shortCode ?? 'A1-1';
         });
@@ -68,12 +68,8 @@ for (const scenario of [
         const update = t.mock.method(allocations, 'updateAllocationIqcSummary', async () => true);
 
         const dto = { actorId: 'EMP', slotCode: 'A1-1' };
-        if (scenario.missingSlot) {
-            await assert.rejects(preview('LOT-ID', dto), /t8_receipt_slot_invalid/);
-            assert.equal(header.mock.callCount(), 0);
-            return;
-        }
         const form = scenario.status ? { revision: 'previous', lines: [] } : await preview('LOT-ID', dto);
+        assert.equal(findSlot.mock.callCount(), 0);
         assert.equal(header.mock.callCount(), 0);
         assert.equal(line.mock.callCount(), 0);
         if (!scenario.status) {
@@ -84,9 +80,11 @@ for (const scenario of [
             ...dto, revision: form.revision,
             totalQuantity: scenario.input ?? form.totalQuantity ?? '0',
         });
-        if (scenario.invalid || scenario.stale) {
-            await assert.rejects(submit, scenario.stale ? /t8_receipt_preview_stale/ : /t8_receipt_quantity_invalid/);
+        if (scenario.invalid || scenario.stale || scenario.missingSlot) {
+            await assert.rejects(submit, scenario.stale ? /t8_receipt_preview_stale/ :
+                scenario.missingSlot ? /t8_receipt_slot_invalid/ : /t8_receipt_quantity_invalid/);
             assert.equal(header.mock.callCount(), 0);
+            assert.equal(line.mock.callCount(), 0);
             assert.equal(update.mock.callCount(), 0);
             return;
         }

@@ -20,7 +20,12 @@ async function findWaitingPeers(anchorId, query) {
     return rows.map((row) => row.id);
 }
 
-async function findSource(noticeId, poId, goodsNo, slotCode, warehouse, query) {
+function withoutWarehousePrefix(slotCode, warehouseCode) {
+    const prefix = warehouseCode + '-';
+    return slotCode.startsWith(prefix) ? slotCode.slice(prefix.length) : slotCode;
+}
+
+async function findSource(noticeId, poId, goodsNo, slotCode, warehouseCode, warehouse, query) {
     const { rows } = await query(`
         SELECT n.sheet_no AS notice_no, n.sheet_id AS notice_id,
                n.pur_no, n.pur_id, n.goods_no, n.unit_no, n.unit_rate,
@@ -43,7 +48,7 @@ async function findSource(noticeId, poId, goodsNo, slotCode, warehouse, query) {
         ) iqc
         CROSS APPLY (
             SELECT SUM(CASE WHEN p.sheet_sta = '0' THEN d.sheet_qty ELSE 0 END) AS draft_qty,
-                   SUM(CASE WHEN d.st_bit_no = ? AND d.st_no = ? THEN d.sheet_qty ELSE 0 END) AS slot_qty
+                   SUM(CASE WHEN d.st_bit_no IN (?, ?) AND d.st_no = ? THEN d.sheet_qty ELSE 0 END) AS slot_qty
             FROM ${t.in2} d
             JOIN ${t.in1} p ON p.sheet_no = d.sheet_no
             WHERE d.notice_no = n.sheet_no AND d.notice_id = n.sheet_id
@@ -56,7 +61,7 @@ async function findSource(noticeId, poId, goodsNo, slotCode, warehouse, query) {
               )
         ) existing
         WHERE n.id = ? AND n.goods_no = ?
-    `, [poId, slotCode, warehouse, noticeId, goodsNo]);
+    `, [poId, slotCode, withoutWarehousePrefix(slotCode, warehouseCode), warehouse, noticeId, goodsNo]);
     return rows[0];
 }
 
@@ -71,8 +76,7 @@ async function findCreator(empNo, query) {
 }
 
 async function findActiveSlotCode(warehouse, slotCode, warehouseCode, query) {
-    const prefix = warehouseCode + '-';
-    const shortCode = slotCode.startsWith(prefix) ? slotCode.slice(prefix.length) : slotCode;
+    const shortCode = withoutWarehousePrefix(slotCode, warehouseCode);
     const { rows } = await query(`
         SELECT TOP (1) st_bit_no
         FROM ${t.stBits}
