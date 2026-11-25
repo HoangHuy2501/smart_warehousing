@@ -4,6 +4,22 @@ const { TABLES: t } = require('./tables');
 const audit = require('../../util/sql-audit');
 const operationLog = require('./t8-operation-log.repository');
 
+async function findWaitingPeers(anchorId, query) {
+    const { rows } = await query(`
+        SELECT DISTINCT a.id
+        FROM ${t.allocation} a
+        JOIN ${t.allocation} anchor ON anchor.id = ?
+        JOIN ${t.receipt} r ON r.allocation_id = a.id
+        JOIN ${t.receipt} seed ON seed.allocation_id = anchor.id
+            AND seed.lot_no = r.lot_no AND seed.qty_in_stock > 0
+        WHERE a.status = 'WAITING_STOCK' AND a.closed_at IS NULL
+          AND a.goods_no = anchor.goods_no AND r.qty_in_stock > 0
+          AND a.id <> anchor.id
+        ORDER BY a.id
+    `, [anchorId]);
+    return rows.map((row) => row.id);
+}
+
 async function findSource(noticeId, poId, goodsNo, slotCode, query) {
     const { rows } = await query(`
         SELECT n.sheet_no AS notice_no, n.sheet_id AS notice_id,
@@ -119,7 +135,7 @@ async function insertRow(table, logicalName, values, employeeNo, query) {
 }
 
 module.exports = {
-    findSource, findCreator, hasSlot, reserveSheetNumber, findOpenDraft, nextLineId,
+    findWaitingPeers, findSource, findCreator, hasSlot, reserveSheetNumber, findOpenDraft, nextLineId,
     insertHeader: (values, empNo, query) => insertRow(t.in1, 'pur_in1', values, empNo, query),
     insertLine: (values, empNo, query) => insertRow(t.in2, 'pur_in2', values, empNo, query),
 };
