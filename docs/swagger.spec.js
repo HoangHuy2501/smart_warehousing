@@ -563,9 +563,10 @@ function buildSwaggerSpec() {
           tags: ['Pos'],
           summary: 'PO den hang (tach bootstrap, ho tro phan trang)',
           description:
-            'PO mo + PO lich su con so luong. Khong truen page/pageSize -> ' +
-            'IIncomingPo[] full (sap theo id so). Truen -> phan trang SQL ' +
-            '(ORDER BY o1.close_sw, o2.del_date, o2.id).',
+            'Danh sách dòng PO mở, không lọc theo thời điểm tạm nhập. ' +
+            'Không truyền page/pageSize trả mảng đầy đủ theo ID số. ' +
+            'Có phân trang trả items, total, page, pageSize. Backend đếm tổng riêng ' +
+            'và lấy trang theo ngày dự kiến giao, rồi theo ID dạng chuỗi.',
           parameters: PAGE_PARAMS,
           responses: {
             200: {

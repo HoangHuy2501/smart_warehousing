@@ -1042,18 +1042,9 @@ function makeMemoryRepository() {
     // PO (t8_pur_order1/2 + notice lookup + GRN) — mirror po.repository
     // ================================================================
     pos: {
-      /**
-       * Dòng PO còn HIỆN (rework 2026-10-29, no-max — mirror po.repository
-       * SQL): ĐÃ BỎ gate chưa gán hết theo pur_order (tổng allocated được
-       * vượt PO, sheet_qty chỉ tham khảo); chỉ còn đồng hồ tạm nhập 24h
-       * từ notice1.create_date còn chạy (không có notice hoặc notice mới
-       * nhất trong 24h; NULL = hiện). ORDER BY close_sw, del_date, id —
-       * dùng chung cho list/listPaged.
-       */
+      /** Danh sách PO đến hàng dùng cho bootstrap và /incoming-pos. */
       listRemainingRows() {
-        const now = new Date();
         return [...data.order2]
-          .filter((o2) => noticesClockFresh(noticesOfOrder2(o2), now))
           .sort((a, b) =>
             String(order1BySheetNo(a.sheet_no)?.close_sw || '').localeCompare(
               String(order1BySheetNo(b.sheet_no)?.close_sw || '')
