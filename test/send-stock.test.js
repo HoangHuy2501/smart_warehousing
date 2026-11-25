@@ -72,9 +72,7 @@ for (const scenario of [
         if (scenario.stale) changed = true;
         const submit = send('LOT-ID', {
             ...dto, revision: form.revision,
-            lines: form.lines.map((row) => ({
-                noticeDetailId: row.noticeDetailId, quantity: scenario.input ?? row.quantity,
-            })),
+            totalQuantity: scenario.input ?? form.totalQuantity ?? '0',
         });
         if (scenario.invalid || scenario.stale) {
             await assert.rejects(submit, scenario.stale ? /t8_receipt_preview_stale/ : /t8_receipt_quantity_invalid/);
@@ -162,7 +160,10 @@ test('ghép hai kệ cùng lot và giữ mã vị trí T8 riêng trên từng d�
     const form = await preview('A', dto);
     assert.deepEqual(form.lines.map((r) => [r.allocationId, r.slotCode, r.quantity]),
         [['A', 'A1', '40.00000000'], ['B', 'B1', '60.00000000']]);
-    const result = await send('A', { ...dto, revision: form.revision, lines: form.lines });
+    assert.deepEqual(form.slotCodes, ['A1', 'B1']);
+    assert.equal(form.totalQuantity, '100.00000000');
+    assert.equal(form.lotNo, 'LOT');
+    const result = await send('A', { ...dto, revision: form.revision, totalQuantity: form.totalQuantity });
     assert.equal(header.mock.callCount(), 1);
     assert.deepEqual(lock.mock.calls.map((call) => call.arguments[0]), ['A', 'B']);
     assert.deepEqual(line.mock.calls.map(({ arguments: [r] }) => [r.st_bit_no, r.sheet_qty]),

@@ -10,6 +10,20 @@ const stock = require('../repository/sql/stock-sync.repository');
 const t8 = require('../repository/sql/t8-receipt.repository');
 
 const EPSILON = 0.000000005;
+const QUANTITY_SCALE = 100000000n;
+
+function quantityUnits(value) {
+    const [whole, fraction = ''] = String(value).split('.');
+    return BigInt(whole) * QUANTITY_SCALE + BigInt(fraction.padEnd(8, '0'));
+}
+
+function formatQuantity(units) {
+    return String(units / QUANTITY_SCALE) + '.' + String(units % QUANTITY_SCALE).padStart(8, '0');
+}
+
+function totalUnits(lines) {
+    return lines.reduce((sum, line) => sum + quantityUnits(line.values.sheet_qty), 0n);
+}
 
 async function authorize(allocationId, actor, slotCode, tx) {
     const allocation = await locks.findAllocationForSync(allocationId, tx);
@@ -52,11 +66,12 @@ async function getGroup(allocationId, actor, slotCode, tx, lockGroup) {
     const lots = new Set(members.find((member) => member.id === allocationId).receipts
         .map((receipt) => receipt.lotNo.trim()));
     if (!lots.size) err('lot_stock_unresolved', 409);
+    if (lots.size > 1) err('t8_receipt_multiple_lots', 409);
     for (const member of members) {
         member.included = member.receipts.filter((receipt) => lots.has(receipt.lotNo.trim()));
         member.completeLot = member.included.length === member.receipts.length;
     }
-    return { anchor, members };
+    return { anchor, members, lotNo: [...lots][0] };
 }
 
 async function planLines(members, tx, lockNotices) {
@@ -119,6 +134,9 @@ async function planLines(members, tx, lockNotices) {
             plannedByNotice.set(id, (plannedByNotice.get(id) || 0) + quantity);
         }
     }
+    if (new Set(planned.map((line) => line.values.unit_no)).size > 1) {
+        err('t8_receipt_mixed_units', 409);
+    }
     return planned;
 }
 
@@ -128,11 +146,14 @@ function revision(allocationId, slotCode, members, lines) {
 
 async function preview(allocationId, { actorId, slotCode }) {
     const actor = await getActor(actorId, slotCode);
-    const { anchor: allocation, members } = await getGroup(allocationId, actor, slotCode, db.query, false);
+    const { anchor: allocation, members, lotNo } = await getGroup(allocationId, actor, slotCode, db.query, false);
     if (allocation.status !== 'WAITING_STOCK') err('lot_not_waiting_stock', 409);
     const planned = await planLines(members, db.query, false);
+    const maxTotalQuantity = formatQuantity(totalUnits(planned));
     return {
-        allocationId, slotCode, status: allocation.status,
+        allocationId, slotCode, lotNo, status: allocation.status,
+        slotCodes: [...new Set(members.map((member) => member.allocation.slotCode))].sort(),
+        totalQuantity: maxTotalQuantity, maxTotalQuantity,
         mode: planned.length ? 'ENTER_QUANTITY' : 'CONFIRM_EXISTING',
         revision: revision(allocationId, slotCode, members, planned),
         allocationIds: members.map((member) => member.id),
@@ -149,9 +170,9 @@ async function preview(allocationId, { actorId, slotCode }) {
     };
 }
 
-async function send(allocationId, { actorId, slotCode, revision: expectedRevision, lines }) {
+async function send(allocationId, { actorId, slotCode, revision: expectedRevision, totalQuantity }) {
     const actor = await getActor(actorId, slotCode);
-    if (typeof expectedRevision !== 'string' || !Array.isArray(lines)) err('t8_receipt_preview_required');
+    if (typeof expectedRevision !== 'string') err('t8_receipt_preview_required');
 
     return db.withTransaction(async (tx) => {
         const { anchor: allocation, members } = await getGroup(allocationId, actor, slotCode, tx, true);
@@ -162,29 +183,23 @@ async function send(allocationId, { actorId, slotCode, revision: expectedRevisio
         const planned = await planLines(members, tx, true);
         if (expectedRevision !== revision(allocationId, slotCode, members, planned)) err('t8_receipt_preview_stale', 409);
 
-        const requested = new Map();
-        for (const line of lines) {
-            const lineAllocationId = line?.allocationId ?? allocationId;
-            const key = JSON.stringify([lineAllocationId, line?.noticeDetailId]);
-            if (typeof lineAllocationId !== 'string' ||
-                !Number.isSafeInteger(line?.noticeDetailId) || requested.has(key) ||
-                !['number', 'string'].includes(typeof line.quantity) ||
-                !/^\d+(\.\d{1,8})?$/.test(String(line.quantity))) err('t8_receipt_quantity_invalid');
-            requested.set(key, Number(line.quantity));
-        }
-        if (requested.size !== planned.length) err('t8_receipt_quantity_invalid');
+        if (!['number', 'string'].includes(typeof totalQuantity) ||
+            !/^\d{1,20}(\.\d{1,8})?$/.test(String(totalQuantity))) err('t8_receipt_quantity_invalid');
+        const maximum = totalUnits(planned);
+        let remaining = quantityUnits(totalQuantity);
+        if (remaining > maximum || (maximum > 0n && remaining === 0n)) err('t8_receipt_quantity_invalid');
 
         const byNotice = new Map();
-        let partial = false;
-        for (const { allocationId: lineAllocationId, id, supplier, values } of planned) {
-            const quantity = requested.get(JSON.stringify([lineAllocationId, id]));
-            if (!Number.isFinite(quantity) || quantity <= 0 || quantity > Number(values.sheet_qty)) {
-                err('t8_receipt_quantity_invalid');
-            }
-            if (quantity < Number(values.sheet_qty)) partial = true;
+        const partial = remaining < maximum;
+        // Allocate in the same stable order as the preview, keeping each T8 location.
+        for (const { supplier, values } of planned) {
+            if (remaining === 0n) break;
+            const cap = quantityUnits(values.sheet_qty);
+            const quantity = remaining < cap ? remaining : cap;
             const group = byNotice.get(values.notice_no) || { supplier, lines: [] };
-            group.lines.push({ ...values, sheet_qty: quantity.toFixed(8) });
+            group.lines.push({ ...values, sheet_qty: formatQuantity(quantity) });
             byNotice.set(values.notice_no, group);
+            remaining -= quantity;
         }
 
         const sheetNos = [];
