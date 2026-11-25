@@ -20,10 +20,10 @@ async function findWaitingPeers(anchorId, query) {
     return rows.map((row) => row.id);
 }
 
-async function findSource(noticeId, poId, goodsNo, slotCode, query) {
+async function findSource(noticeId, poId, goodsNo, slotCode, warehouse, query) {
     const { rows } = await query(`
         SELECT n.sheet_no AS notice_no, n.sheet_id AS notice_id,
-               n.pur_no, n.pur_id, n.goods_no, n.unit_no, n.unit_rate, n.st_no,
+               n.pur_no, n.pur_id, n.goods_no, n.unit_no, n.unit_rate,
                n.made_lot, n.sheet_pri, n.pri_dis, n.tax_sw, n.cur_no, n.inv_type,
                n.rem, n.def02 AS def14, n.def12 AS def15, h.su_no,
                iqc.match_count, iqc.adj_result, iqc.sheet_qty, iqc.return_qty,
@@ -43,7 +43,7 @@ async function findSource(noticeId, poId, goodsNo, slotCode, query) {
         ) iqc
         CROSS APPLY (
             SELECT SUM(CASE WHEN p.sheet_sta = '0' THEN d.sheet_qty ELSE 0 END) AS draft_qty,
-                   SUM(CASE WHEN d.st_bit_no = ? THEN d.sheet_qty ELSE 0 END) AS slot_qty
+                   SUM(CASE WHEN d.st_bit_no = ? AND d.st_no = ? THEN d.sheet_qty ELSE 0 END) AS slot_qty
             FROM ${t.in2} d
             JOIN ${t.in1} p ON p.sheet_no = d.sheet_no
             WHERE d.notice_no = n.sheet_no AND d.notice_id = n.sheet_id
@@ -56,7 +56,7 @@ async function findSource(noticeId, poId, goodsNo, slotCode, query) {
               )
         ) existing
         WHERE n.id = ? AND n.goods_no = ?
-    `, [poId, slotCode, noticeId, goodsNo]);
+    `, [poId, slotCode, warehouse, noticeId, goodsNo]);
     return rows[0];
 }
 

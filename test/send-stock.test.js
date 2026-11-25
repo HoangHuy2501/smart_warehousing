@@ -29,7 +29,7 @@ for (const scenario of [
         t.mock.method(db, 'withTransaction', async (callback) => callback(tx));
         t.mock.method(shared, 'getActor', async () => ({ id: 'EMP' }));
         t.mock.method(shared, 'canAccessSlot', () => true);
-        t.mock.method(slots, 'byCode', async () => ({ code: 'A1-1' }));
+        t.mock.method(slots, 'byCode', async () => ({ code: 'A1-1', warehouse: 'GIF3' }));
         t.mock.method(locks, 'acquireAllocationLock', async () => {});
         t.mock.method(locks, 'acquireNoticeLock', async () => {});
         t.mock.method(locks, 'findAllocationForSync', async () => ({
@@ -49,13 +49,16 @@ for (const scenario of [
             return {
                 notice_no: 'PN', notice_id: 2, pur_no: 'PO', pur_id: 3, goods_no: 'GOODS',
                 made_lot: 'LOT', sheet_qty: 100, return_qty: 0, match_count: 1, adj_result: '1',
-                draft_qty: scenario.draft + (changed ? 1 : 0), slot_qty: scenario.slotQty, su_no: 'SU', st_no: '101',
+                draft_qty: scenario.draft + (changed ? 1 : 0), slot_qty: scenario.slotQty, su_no: 'SU', st_no: '999',
                 sheet_pri: 500, unit_rate: 1, pri_dis: 1,
             };
         });
         t.mock.method(t8, 'findOpenDraft', async () => scenario.reuse ? ['PIGI0001'] : []);
         t.mock.method(t8, 'nextLineId', async () => 7);
-        t.mock.method(t8, 'hasSlot', async () => true);
+        t.mock.method(t8, 'hasSlot', async (warehouse) => {
+            assert.equal(warehouse, '101');
+            return true;
+        });
         t.mock.method(t8, 'findCreator', async () => ({ user_no: 'EMP', emp_no: null }));
         t.mock.method(t8, 'reserveSheetNumber', async () => 'PSMGI261123001');
         const header = t.mock.method(t8, 'insertHeader', async () => {});
@@ -94,6 +97,7 @@ for (const scenario of [
             assert.equal(line.mock.calls[0].arguments[0].sheet_id, scenario.reuse ? 7 : 1);
             assert.equal(line.mock.calls[0].arguments[0].sheet_qty, scenario.expected);
             assert.equal(line.mock.calls[0].arguments[0].st_bit_no, 'A1-1');
+            assert.equal(line.mock.calls[0].arguments[0].st_no, '101');
         }
     });
 }
@@ -132,7 +136,7 @@ test('ghép hai kệ cùng lot và giữ mã vị trí T8 riêng trên từng d�
     t.mock.method(db, 'withTransaction', async (callback) => callback(tx));
     t.mock.method(shared, 'getActor', async () => ({ id: 'EMP' }));
     t.mock.method(shared, 'canAccessSlot', () => true);
-    t.mock.method(slots, 'byCode', async (code) => ({ code }));
+    t.mock.method(slots, 'byCode', async (code) => ({ code, warehouse: 'GIF3' }));
     const lock = t.mock.method(locks, 'acquireAllocationLock', async () => {});
     t.mock.method(locks, 'acquireNoticeLock', async () => {});
     t.mock.method(locks, 'findAllocationForSync', async (id) => rows[id]);
