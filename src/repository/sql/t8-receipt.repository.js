@@ -4,14 +4,15 @@ const { TABLES: t } = require('./tables');
 const audit = require('../../util/sql-audit');
 const operationLog = require('./t8-operation-log.repository');
 
-async function findSource(noticeId, poId, goodsNo, query) {
+async function findSource(noticeId, poId, goodsNo, slotCode, query) {
     const { rows } = await query(`
         SELECT n.sheet_no AS notice_no, n.sheet_id AS notice_id,
                n.pur_no, n.pur_id, n.goods_no, n.unit_no, n.unit_rate, n.st_no,
                n.made_lot, n.sheet_pri, n.pri_dis, n.tax_sw, n.cur_no, n.inv_type,
                n.rem, n.def02 AS def14, n.def12 AS def15, h.su_no,
                iqc.match_count, iqc.adj_result, iqc.sheet_qty, iqc.return_qty,
-               COALESCE(drafts.qty, 0) AS draft_qty
+               COALESCE(existing.draft_qty, 0) AS draft_qty,
+               COALESCE(existing.slot_qty, 0) AS slot_qty
         FROM ${t.notice2} n
         JOIN ${t.notice1} h ON h.sheet_no = n.sheet_no
         JOIN ${t.order2} po ON po.id = ? AND po.sheet_no = n.pur_no
@@ -25,20 +26,21 @@ async function findSource(noticeId, poId, goodsNo, query) {
               AND i.goods_no = n.goods_no AND i.made_lot = n.made_lot
         ) iqc
         CROSS APPLY (
-            SELECT SUM(d.sheet_qty) AS qty
+            SELECT SUM(CASE WHEN p.sheet_sta = '0' THEN d.sheet_qty ELSE 0 END) AS draft_qty,
+                   SUM(CASE WHEN d.st_bit_no = ? THEN d.sheet_qty ELSE 0 END) AS slot_qty
             FROM ${t.in2} d
+            JOIN ${t.in1} p ON p.sheet_no = d.sheet_no
             WHERE d.notice_no = n.sheet_no AND d.notice_id = n.sheet_id
               AND d.pur_no = n.pur_no AND d.pur_id = n.pur_id
               AND d.goods_no = n.goods_no AND d.made_lot = n.made_lot
               AND d.unit_no = n.unit_no
               AND EXISTS (
-                  SELECT 1 FROM ${t.in1} p
-                  JOIN ${t.userPass} u ON u.user_no = p.create_user AND u.user_name <> 'ADM'
-                  WHERE p.sheet_no = d.sheet_no AND p.sheet_sta = '0'
+                  SELECT 1 FROM ${t.userPass} u
+                  WHERE u.user_no = p.create_user AND u.user_name <> 'ADM'
               )
-        ) drafts
+        ) existing
         WHERE n.id = ? AND n.goods_no = ?
-    `, [poId, noticeId, goodsNo]);
+    `, [poId, slotCode, noticeId, goodsNo]);
     return rows[0];
 }
 

@@ -9,7 +9,7 @@ const locks = require('../src/repository/sql/receipt-sync.repository');
 const slots = require('../src/repository/sql/slot.repository');
 const stock = require('../src/repository/sql/stock-sync.repository');
 const t8 = require('../src/repository/sql/t8-receipt.repository');
-const { send } = require('../src/services/send-stock.service');
+const { preview, send } = require('../src/services/send-stock.service');
 const { syncAllocation } = require('../src/services/stock-sync.service');
 
 for (const scenario of [
@@ -17,6 +17,10 @@ for (const scenario of [
     { name: 'đã có phiếu nháp đủ', imported: 0, draft: 100 },
     { name: 'tạo nháp phần còn thiếu', imported: 30, draft: 20, expected: '50.00000000' },
     { name: 'ghi nối vào phiếu nháp cùng tạm nhập', imported: 0, draft: 40, expected: '60.00000000', reuse: true },
+    { name: 'lưu một phần và giữ WAITING_STOCK', imported: 0, draft: 0, input: '40', expected: '40.00000000', partial: true },
+    { name: 'lấy số còn thiếu của kệ sau khi gửi một phần', imported: 0, draft: 40, slotQty: 40, expected: '60.00000000', reuse: true },
+    { name: 'từ chối số lượng vượt mức', imported: 0, draft: 0, input: '101', invalid: true },
+    { name: 'từ chối bản xem trước cũ sau khi lượng T8 đổi', imported: 0, draft: 0, stale: true },
     { name: 'bấm lại sau khi gửi', status: 'SEND_STOCK' },
 ]) {
     test(scenario.name, async (t) => {
@@ -38,12 +42,13 @@ for (const scenario of [
             notice_id: 1, lot_no: 'LOT', imported_qty: scenario.imported,
             required_qty: 100, unresolved_count: 0,
         }]);
-        t.mock.method(t8, 'findSource', async (id, poId, goodsNo) => {
-            assert.deepEqual([id, poId, goodsNo], [1, 8, 'GOODS']);
+        let changed = false;
+        t.mock.method(t8, 'findSource', async (id, poId, goodsNo, slotCode) => {
+            assert.deepEqual([id, poId, goodsNo, slotCode], [1, 8, 'GOODS', 'A1-1']);
             return {
                 notice_no: 'PN', notice_id: 2, pur_no: 'PO', pur_id: 3, goods_no: 'GOODS',
                 made_lot: 'LOT', sheet_qty: 100, return_qty: 0, match_count: 1, adj_result: '1',
-                draft_qty: scenario.draft, su_no: 'SU', st_no: '101',
+                draft_qty: scenario.draft + (changed ? 1 : 0), slot_qty: scenario.slotQty, su_no: 'SU', st_no: '101',
                 sheet_pri: 500, unit_rate: 1, pri_dis: 1,
             };
         });
@@ -56,10 +61,30 @@ for (const scenario of [
         const line = t.mock.method(t8, 'insertLine', async () => {});
         const update = t.mock.method(allocations, 'updateAllocationIqcSummary', async () => true);
 
-        const result = await send('LOT-ID', { actorId: 'EMP', slotCode: 'A1-1' });
-        assert.equal(result.status, 'SEND_STOCK');
+        const dto = { actorId: 'EMP', slotCode: 'A1-1' };
+        const form = scenario.status ? { revision: 'previous', lines: [] } : await preview('LOT-ID', dto);
+        assert.equal(header.mock.callCount(), 0);
+        assert.equal(line.mock.callCount(), 0);
+        if (!scenario.status) {
+            assert.equal(form.mode, form.lines.length ? 'ENTER_QUANTITY' : 'CONFIRM_EXISTING');
+        }
+        if (scenario.stale) changed = true;
+        const submit = send('LOT-ID', {
+            ...dto, revision: form.revision,
+            lines: form.lines.map((row) => ({
+                noticeDetailId: row.noticeDetailId, quantity: scenario.input ?? row.quantity,
+            })),
+        });
+        if (scenario.invalid || scenario.stale) {
+            await assert.rejects(submit, scenario.stale ? /t8_receipt_preview_stale/ : /t8_receipt_quantity_invalid/);
+            assert.equal(header.mock.callCount(), 0);
+            assert.equal(update.mock.callCount(), 0);
+            return;
+        }
+        const result = await submit;
+        assert.equal(result.status, scenario.partial ? 'WAITING_STOCK' : 'SEND_STOCK');
         assert.deepEqual(result.sheetNos, scenario.reuse ? ['PIGI0001'] : scenario.expected ? ['PSMGI261123001'] : []);
-        assert.equal(update.mock.callCount(), scenario.status ? 0 : 1);
+        assert.equal(update.mock.callCount(), scenario.status || scenario.partial ? 0 : 1);
         assert.equal(header.mock.callCount(), scenario.expected && !scenario.reuse ? 1 : 0);
         assert.equal(line.mock.callCount(), scenario.expected ? 1 : 0);
         if (scenario.expected && !scenario.reuse) {

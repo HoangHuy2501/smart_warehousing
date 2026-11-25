@@ -93,6 +93,9 @@ router.post(
   asyncHandler(controller.injectDecision)
 );
 
+router.get('/lots/:id/t8-receipt', requireAuth, requireWarehouseOperator,
+  asyncHandler(controller.previewSendStock));
+
 router.post(
   '/lots/:id/t8-receipt',
   requireAuth,
