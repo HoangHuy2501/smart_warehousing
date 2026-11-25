@@ -930,6 +930,7 @@ class PoModel {
       -- BUCKET MOI: 5 moc ngay tinh JS, khong CONVERT o2.del_date
       AND (
         CAST(? AS NVARCHAR(10)) IS NULL
+        OR (? = 'overdue' AND (o2.del_date IS NULL OR o2.del_date < ?))
         OR (? = 'od3p' AND (o2.del_date IS NULL OR o2.del_date < ?))
         OR (? = 'od2' AND o2.del_date >= ? AND o2.del_date < ?)
         OR (? = 'od1' AND o2.del_date >= ? AND o2.del_date < ?)
@@ -966,6 +967,8 @@ class PoModel {
       keeperEmpNo,
       // BUCKET: mỗi nhánh = bucket + 2 mốc ngày tương ứng
       bucket,
+      bucket,
+      today,
       bucket,
       twoMonthsAgoStart,
       bucket,
@@ -1146,7 +1149,7 @@ class PoModel {
       await this.fillTempTables(query, sp);
 
       const offset = (opts.page - 1) * opts.pageSize;
-      const sqlRows = `
+      const eligibleSql = `
     -- DECLARE @prefixPattern NVARCHAR(140) = 'PO1%';
     -- DECLARE @containsPattern NVARCHAR(160) = NULL;
     -- DECLARE @bucket NVARCHAR(10) = 'od1';
@@ -1263,6 +1266,51 @@ class PoModel {
       UNION ALL
       SELECT * FROM notice_branch
     )
+  `;
+      const filterSql = `
+    FROM eligible u
+    WHERE (
+      CAST(? AS NVARCHAR(140)) IS NULL
+      OR u.po_number LIKE ?
+      OR u.item_code LIKE ?
+      OR u.lot_no LIKE ?
+      OR u.material LIKE ?
+      OR u.supplier LIKE ?
+    )
+    AND (
+      CAST(? AS NVARCHAR(10)) IS NULL
+      OR (? = 'overdue' AND (u.del_date IS NULL OR u.del_date < ?))
+      OR (? = 'od3p' AND (u.del_date IS NULL OR u.del_date < ?))
+      OR (? = 'od2' AND u.del_date >= ? AND u.del_date < ?)
+      OR (? = 'od1' AND u.del_date >= ? AND u.del_date < ?)
+      OR (? = 'next3' AND u.del_date >= ? AND u.del_date < ?)
+      OR (? = 'next7' AND u.del_date >= ? AND u.del_date < ?)
+    )
+  `;
+      const filterParams = [
+        sp.prefixPattern, sp.prefixPattern, sp.prefixPattern, sp.prefixPattern,
+        sp.containsPattern, sp.containsPattern,
+        sp.bucket, sp.bucket, sp.today,
+        sp.bucket, sp.twoMonthsAgoStart,
+        sp.bucket, sp.twoMonthsAgoStart, sp.prevMonthStart,
+        sp.bucket, sp.prevMonthStart, sp.today,
+        sp.bucket, sp.today, sp.next3End,
+        sp.bucket, sp.next3End, sp.next7End,
+      ];
+      guardParams(filterParams);
+
+      const counted = await query(toDialect(`${eligibleSql}
+        SELECT COUNT(*) AS [total], COUNT(DISTINCT u.po_number) AS [poTotal]
+        ${filterSql};
+      `), filterParams);
+      const total = Number(counted.rows[0]?.total ?? 0);
+      const poTotal = Number(counted.rows[0]?.poTotal ?? 0);
+
+      let rows = [];
+      if (offset < total) {
+        const rowsParams = [...filterParams, offset, opts.pageSize];
+        guardParams(rowsParams);
+        const result = await query(toDialect(`${eligibleSql}
     SELECT
       u.id AS [id],
       CAST(u.po_id AS VARCHAR(20)) AS [poLine],
@@ -1283,203 +1331,15 @@ class PoModel {
       CAST(0 AS BIT) AS [closed],
       u.sheet_date AS [sheetDate],
       u.del_date AS [delDate],
-      'mock' AS [source],
-      COUNT(*) OVER() AS [totalCnt]
-    FROM eligible u
-    WHERE (
-      CAST(? AS NVARCHAR(140)) IS NULL
-      OR u.po_number LIKE ?
-      OR u.item_code LIKE ?
-      OR u.lot_no LIKE ?
-      OR u.material LIKE ?
-      OR u.supplier LIKE ?
-    )
-    AND (
-      CAST(? AS NVARCHAR(10)) IS NULL
-      OR (? = 'od3p' AND (u.del_date IS NULL OR u.del_date < ?))
-      OR (? = 'od2' AND u.del_date >= ? AND u.del_date < ?)
-      OR (? = 'od1' AND u.del_date >= ? AND u.del_date < ?)
-      OR (? = 'next3' AND u.del_date >= ? AND u.del_date < ?)
-      OR (? = 'next7' AND u.del_date >= ? AND u.del_date < ?)
-    )
+      'mock' AS [source]
+    ${filterSql}
     ORDER BY u.del_date ASC, u.po_sort ASC, u.lot_sort ASC
     OFFSET ? ROWS FETCH NEXT ? ROWS ONLY;
-  `;
-      const rowsParams = [
-        // KEYWORD: 4 nhánh prefix (po_number, item_code, lot_no) + 2 contains
-        sp.prefixPattern,
-        sp.prefixPattern,
-        sp.prefixPattern,
-        sp.prefixPattern,
-        sp.containsPattern,
-        sp.containsPattern,
-        // BUCKET: mỗi nhánh = bucket + 2 mốc ngày tương ứng
-        sp.bucket,
-        sp.bucket,
-        sp.twoMonthsAgoStart,
-        sp.bucket,
-        sp.twoMonthsAgoStart,
-        sp.prevMonthStart,
-        sp.bucket,
-        sp.prevMonthStart,
-        sp.today,
-        sp.bucket,
-        sp.today,
-        sp.next3End,
-        sp.bucket,
-        sp.next3End,
-        sp.next7End,
-        // Phân trang
-        offset,
-        opts.pageSize,
-      ];
-      guardParams(rowsParams);
-      const rowsResult = await query(toDialect(sqlRows), rowsParams);
-      const rows = rowsResult.rows;
-      let total = 0;
-      if (rows.length === 0 && opts.page > 1) {
-        // Trang vượt cuối: COUNT(*) OVER() rỗng — đếm riêng (không phân trang),
-        // cùng predicate keyword + bucket. NULL del_date = od3p (thống nhất
-        // với câu rows + countPurchaseBuckets).
-        const sqlCount = `
-    -- DECLARE @prefixPattern NVARCHAR(140) = NULL;
-    -- DECLARE @containsPattern NVARCHAR(160) = NULL;
-    -- DECLARE @bucket NVARCHAR(10) = NULL;
-    -- DECLARE @today DATETIME = '2026-10-20';
-    -- DECLARE @prevMonthStart DATETIME = '2026-09-01';
-    -- DECLARE @twoMonthsAgoStart DATETIME = '2026-08-01';
-    -- DECLARE @next3End DATETIME = '2026-10-24';
-    -- DECLARE @next7End DATETIME = '2026-10-28';
-    WITH noticed AS (
-      SELECT po_id, SUM(sheet_qty) AS noticed_qty, MAX(create_date) AS latest_create
-      FROM #Notice
-      GROUP BY po_id
-    ),
-    gap AS (
-      SELECT
-        p.po_id AS po_id,
-        p.po_number AS po_number,
-        p.item_code AS item_code,
-        p.material AS material,
-        p.supplier AS supplier,
-        -- Gap row chưa có tạm nhập — chưa có business lot (2026-10-29).
-        CAST(NULL AS VARCHAR(40)) AS lot_no,
-        p.del_date AS del_date,
-        p.po_id AS po_sort,
-        0 AS lot_sort
-      FROM #PO p
-      LEFT JOIN noticed nc ON nc.po_id = p.po_id
-      -- HIỆN THỊ (2026-10-28): đồng hồ tạm nhập 24h — chưa có notice hoặc
-      -- notice1.create_date mới nhất còn trong 24h (NULL = hiện)
-      WHERE (
-        nc.po_id IS NULL
-        OR nc.latest_create IS NULL
-        OR nc.latest_create >= DATEADD(HOUR, -24, GETDATE())
-      )
-      -- ẨN gap rỗng (rework 2026-10-29, no-max): chỉ ẩn khi T8 đã tạm nhập
-      -- đủ tham chiếu — sheet_qty − noticed <= 0; KHÔNG trừ gap_assigned
-      -- để tổng allocated đạt/vượt PO không làm row biến mất (user được
-      -- gán vượt PO, sheet_qty chỉ là tham khảo — row có thể hiện với
-      -- qty <= 0 khi over-assign phần chưa tạm nhập). Mirror memory
-      -- repository if (sheet_qty - noticed > 0).
-      AND (p.sheet_qty - COALESCE(nc.noticed_qty, 0)) > 0
-    ),
-    notice_branch AS (
-      SELECT
-        x.po_id AS po_id,
-        p2.po_number AS po_number,
-        p2.item_code AS item_code,
-        p2.material AS material,
-        p2.supplier AS supplier,
-        x.made_lot AS lot_no,
-        p2.del_date AS del_date,
-        x.po_id AS po_sort,
-        x.notice_id AS lot_sort
-      FROM (
-        SELECT
-          n.notice_id,
-          n.po_id,
-          n.pur_no,
-          n.goods_no,
-          n.made_lot,
-          n.sheet_qty,
-          n.create_date,
-          ROW_NUMBER() OVER (
-            PARTITION BY n.notice_id ORDER BY n.po_id ASC
-          ) AS rn
-        FROM #Notice n
-      ) x
-      JOIN #PO p2 ON p2.po_id = x.po_id
-      WHERE x.rn = 1
-        AND (x.create_date IS NULL
-             OR x.create_date >= DATEADD(HOUR, -24, GETDATE()))
-        AND NOT EXISTS (
-          SELECT 1 FROM #PurIn pi
-          WHERE pi.pur_no = x.pur_no
-            AND pi.goods_no = x.goods_no
-            AND pi.made_lot = x.made_lot
-        )
-    ),
-    eligible AS (
-      SELECT * FROM gap
-      UNION ALL
-      SELECT * FROM notice_branch
-    )
-    SELECT COUNT(*) AS [total]
-    FROM eligible u
-    WHERE (
-      CAST(? AS NVARCHAR(140)) IS NULL
-      OR u.po_number LIKE ?
-      OR u.item_code LIKE ?
-      OR u.lot_no LIKE ?
-      OR u.material LIKE ?
-      OR u.supplier LIKE ?
-    )
-    AND (
-      CAST(? AS NVARCHAR(10)) IS NULL
-      OR (? = 'od3p' AND (u.del_date IS NULL OR u.del_date < ?))
-      OR (? = 'od2' AND u.del_date >= ? AND u.del_date < ?)
-      OR (? = 'od1' AND u.del_date >= ? AND u.del_date < ?)
-      OR (? = 'next3' AND u.del_date >= ? AND u.del_date < ?)
-      OR (? = 'next7' AND u.del_date >= ? AND u.del_date < ?)
-    );
-  `;
-        const countParams = [
-          // KEYWORD: 4 nhánh prefix + 2 contains
-          sp.prefixPattern,
-          sp.prefixPattern,
-          sp.prefixPattern,
-          sp.prefixPattern,
-          sp.containsPattern,
-          sp.containsPattern,
-          // BUCKET: mỗi nhánh = bucket + 2 mốc ngày tương ứng
-          sp.bucket,
-          sp.bucket,
-          sp.twoMonthsAgoStart,
-          sp.bucket,
-          sp.twoMonthsAgoStart,
-          sp.prevMonthStart,
-          sp.bucket,
-          sp.prevMonthStart,
-          sp.today,
-          sp.bucket,
-          sp.today,
-          sp.next3End,
-          sp.bucket,
-          sp.next3End,
-          sp.next7End,
-        ];
-        guardParams(countParams);
-        const counted = await query(toDialect(sqlCount), countParams);
-        total = Number(counted.rows[0] ? counted.rows[0].total : 0);
-      } else if (rows.length > 0) {
-        total = Number(rows[0].totalCnt || 0);
+        `), rowsParams);
+        rows = result.rows;
       }
-      // totalCnt là cột nội bộ của pipeline (chỉ dùng khi không chạy
-      // COUNT riêng) — service map qua toApiPo (whitelist) nên không
-      // lộ ra FE; không tự strip trong repository (refactor 2026-10-26).
       await this.dropTempTables(query);
-      return { rows, total };
+      return { rows, total, poTotal };
     });
   }
 
@@ -1588,8 +1448,7 @@ class PoModel {
       UNION ALL
       SELECT * FROM notice_branch
     )
-    SELECT t.bucket AS [bucket], COUNT(DISTINCT t.po_number) AS [n]
-    FROM (
+    , bucketed AS (
       SELECT
         u.po_number,
         CASE
@@ -1609,9 +1468,13 @@ class PoModel {
         OR u.material LIKE ?
         OR u.supplier LIKE ?
       )
-    ) t
-    WHERE t.bucket IS NOT NULL
-    GROUP BY t.bucket;
+    )
+    SELECT bucket AS [bucket], COUNT(DISTINCT po_number) AS [n]
+    FROM bucketed WHERE bucket IS NOT NULL
+    GROUP BY bucket
+    UNION ALL
+    SELECT 'overdue', COUNT(DISTINCT po_number)
+    FROM bucketed WHERE bucket IN ('od1', 'od2', 'od3p');
   `;
       const bucketsParams = [
         // CASE bucket: 9 mốc ngày (thứ tự trong CASE, TRƯỚC phần WHERE)

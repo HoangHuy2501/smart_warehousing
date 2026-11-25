@@ -213,11 +213,13 @@ const PO_LINE_PAGE_SCHEMA = {
     total: { type: 'integer', example: 42 },
     page: { type: 'integer', example: 1 },
     pageSize: { type: 'integer', example: 15 },
+    poTotal: { type: 'integer', description: 'Số mã PO duy nhất theo bộ lọc hiện tại, không phân trang.' },
     bucketCounts: {
       type: 'object',
       description:
         'So DON (poNumber duy nhat) theo bucket ETA (2026-10-20: od1/od2/od3p/next3/next7) — loc theo keyword, KHONG loc bucket. del_date >= next7End nam ngoai 5 bucket → khong duoc dem.',
       properties: {
+        overdue: { type: 'integer', description: 'PO quá dự kiến, đếm một lần trên cả ba nhóm.' },
         od1: { type: 'integer' },
         od2: { type: 'integer' },
         od3p: { type: 'integer' },
@@ -626,7 +628,7 @@ function buildSwaggerSpec() {
               in: 'query',
               schema: {
                 type: 'string',
-                enum: ['od1', 'od2', 'od3p', 'next3', 'next7'],
+                enum: ['overdue', 'od1', 'od2', 'od3p', 'next3', 'next7'],
               },
               description:
                 'Loc theo bucket ETA (gia tri khac = khong loc). Boundary: ' +

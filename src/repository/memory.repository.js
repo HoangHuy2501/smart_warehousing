@@ -660,7 +660,8 @@ function makeMemoryRepository() {
    * NULL del_date = od3p.
    */
   function inBucket(o2, bucket, opts) {
-    return bucketOfCase(o2, opts) === bucket;
+    const actual = bucketOfCase(o2, opts);
+    return bucket === 'overdue' ? ['od1', 'od2', 'od3p'].includes(actual) : actual === bucket;
   }
 
   /**
@@ -1196,6 +1197,7 @@ function makeMemoryRepository() {
             .slice(offset, offset + opts.pageSize)
             .map(mapSearchRow),
           total,
+          poTotal: new Set(rows.map(({ o1 }) => o1.sheet_no)).size,
         };
       },
       /**
@@ -1215,7 +1217,8 @@ function makeMemoryRepository() {
           if (o1) set.add(o1.sheet_no);
           seen.set(bucket, set);
         }
-        const counts = {};
+        const overdue = new Set(['od1', 'od2', 'od3p'].flatMap((bucket) => [...(seen.get(bucket) ?? [])]));
+        const counts = { overdue: overdue.size };
         for (const [bucket, set] of seen) counts[bucket] = set.size;
         return counts;
       },

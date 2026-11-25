@@ -48,7 +48,7 @@ const SlotRepository = require('../repository/sql/slot.repository');
 const ActivityRepository = require('../repository/sql/activity.repository');
 
 /** Bucket hợp lệ của query /pos — giá trị khác → coi như không truyền. */
-const VALID_BUCKETS = ['od1', 'od2', 'od3p', 'next3', 'next7'];
+const VALID_BUCKETS = ['overdue', 'od1', 'od2', 'od3p', 'next3', 'next7'];
 
 /** page >= 1; chuỗi rỗng / sai định dạng / NaN → 1. */
 function parsePage(value) {
@@ -99,19 +99,20 @@ class SearchServices {
       pageSize,
     };
     if (!wantCounts) {
-      const { rows, total } = await PoRepository.searchPurchases(base);
-      return { items: rows.map(toApiPo), total, page, pageSize };
+      const { rows, total, poTotal } = await PoRepository.searchPurchases(base);
+      return { items: rows.map(toApiPo), total, poTotal, page, pageSize };
     }
     // Điều phối 2 pipeline (refactor 2026-10-26): LIST (pipeline hẹp
     // — bucket + keyword push sớm) rồi BUCKETS (pipeline rộng — không
     // bucket). Thứ tự gọi giữ nguyên như searchPurchasesWithBuckets cũ
     // của repository; kết quả hai mode (sql / memory) không đổi vì cả
     // hai method đều dùng cùng bộ filter gốc.
-    const { rows, total } = await PoRepository.searchPurchases(base);
+    const { rows, total, poTotal } = await PoRepository.searchPurchases(base);
     const buckets = await PoRepository.countPurchaseBuckets(base);
     return {
       items: rows.map(toApiPo),
       total,
+      poTotal,
       page,
       pageSize,
       bucketCounts: buckets,
