@@ -70,12 +70,17 @@ async function findCreator(empNo, query) {
     return rows[0];
 }
 
-async function hasSlot(warehouse, slotCode, query) {
+async function findActiveSlotCode(warehouse, slotCode, warehouseCode, query) {
+    const prefix = warehouseCode + '-';
+    const shortCode = slotCode.startsWith(prefix) ? slotCode.slice(prefix.length) : slotCode;
     const { rows } = await query(`
-        SELECT 1 AS found FROM ${t.stBits}
-        WHERE st_no = ? AND st_bit_no = ? AND act_sw = '1'
-    `, [warehouse, slotCode]);
-    return rows.length > 0;
+        SELECT TOP (1) st_bit_no
+        FROM ${t.stBits}
+        WHERE st_no = CONVERT(varchar(20), ?) AND act_sw = '1'
+          AND st_bit_no IN (CONVERT(varchar(20), ?), CONVERT(varchar(20), ?))
+        ORDER BY CASE WHEN st_bit_no = CONVERT(varchar(20), ?) THEN 0 ELSE 1 END
+    `, [warehouse, slotCode, shortCode, slotCode]);
+    return rows[0]?.st_bit_no?.trim();
 }
 
 async function findOpenDraft(noticeNo, supplier, query) {
@@ -135,7 +140,7 @@ async function insertRow(table, logicalName, values, employeeNo, query) {
 }
 
 module.exports = {
-    findWaitingPeers, findSource, findCreator, hasSlot, reserveSheetNumber, findOpenDraft, nextLineId,
+    findWaitingPeers, findSource, findCreator, findActiveSlotCode, reserveSheetNumber, findOpenDraft, nextLineId,
     insertHeader: (values, empNo, query) => insertRow(t.in1, 'pur_in1', values, empNo, query),
     insertLine: (values, empNo, query) => insertRow(t.in2, 'pur_in2', values, empNo, query),
 };

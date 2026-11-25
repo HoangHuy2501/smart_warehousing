@@ -93,6 +93,7 @@ async function planLines(members, tx, lockNotices) {
     for (const { id: allocationId, allocation, included } of members) {
         const slotCode = allocation.slotCode;
         const warehouse = t8WarehouseNumbers[allocation.warehouse] ?? null;
+        let t8SlotCode;
         const memberNoticeIds = [...new Set(included.map((r) => Number(r.noticeDetailId)))].sort((a, b) => a - b);
         for (const id of memberNoticeIds) {
             const local = included.filter((r) => Number(r.noticeDetailId) === id);
@@ -102,7 +103,11 @@ async function planLines(members, tx, lockNotices) {
 
             const required = Number(row.required_qty);
             const imported = Number(row.imported_qty);
-            const source = await t8.findSource(id, allocation.poId, allocation.goodsNo, slotCode, warehouse, tx);
+            if (imported < required && warehouse && t8SlotCode === undefined) {
+                t8SlotCode = await t8.findActiveSlotCode(warehouse, slotCode, allocation.warehouse, tx) ?? null;
+            }
+            const source = await t8.findSource(id, allocation.poId, allocation.goodsNo,
+                t8SlotCode ?? slotCode, warehouse, tx);
             if (!source) err('t8_receipt_source_invalid', 409);
             if (imported >= required) continue;
             const existing = imported + Number(source.draft_qty);
@@ -122,18 +127,18 @@ async function planLines(members, tx, lockNotices) {
                 err('t8_receipt_source_invalid', 409);
             }
             if (!warehouse) err('t8_warehouse_unmapped', 409);
-            if (!await t8.hasSlot(warehouse, slotCode, tx)) err('t8_receipt_slot_invalid', 409);
+            if (!t8SlotCode) err('t8_receipt_slot_invalid', 409);
 
             const values = {
                 notice_no: source.notice_no, notice_id: source.notice_id,
                 pur_no: source.pur_no, pur_id: source.pur_id, goods_no: source.goods_no,
                 unit_no: source.unit_no, unit_rate: source.unit_rate, st_no: warehouse,
-                st_bit_no: slotCode, made_lot: source.made_lot, sheet_qty: quantity.toFixed(8),
+                st_bit_no: t8SlotCode, made_lot: source.made_lot, sheet_qty: quantity.toFixed(8),
                 sheet_pri: source.sheet_pri, pri_dis: source.pri_dis, tax_sw: source.tax_sw,
                 cur_no: source.cur_no, inv_type: source.inv_type, rem: source.rem,
                 def06: source.sheet_qty, def14: source.def14, def15: source.def15, sheet_sta: '0',
             };
-            planned.push({ allocationId, id, supplier: source.su_no, values, existing, slotQty });
+            planned.push({ allocationId, id, slotCode, supplier: source.su_no, values, existing, slotQty });
             plannedByNotice.set(id, (plannedByNotice.get(id) || 0) + quantity);
         }
     }
@@ -157,15 +162,15 @@ async function preview(allocationId, { actorId, slotCode }) {
         allocationId, slotCode, lotNo, status: allocation.status,
         slotCodes: [...new Set(members.map((member) => member.allocation.slotCode))].sort(),
         totalQuantity: maxTotalQuantity, maxTotalQuantity,
-        mode: planned.length ? 'ENTER_QUANTITY' : 'CONFIRM_EXISTING',
+        mode: planned.length ? 'CREATE' : 'CONFIRM_EXISTING',
         revision: revision(allocationId, slotCode, members, planned),
         allocationIds: members.map((member) => member.id),
-        lines: planned.map(({ allocationId: lineAllocationId, id, supplier, values }) => ({
+        lines: planned.map(({ allocationId: lineAllocationId, id, slotCode: lineSlotCode, supplier, values }) => ({
             allocationId: lineAllocationId,
             noticeDetailId: id, supplierNo: supplier, noticeNo: values.notice_no,
             noticeLineId: values.notice_id, poNo: values.pur_no, poLineId: values.pur_id,
             goodsNo: values.goods_no, lotNo: values.made_lot, unitNo: values.unit_no,
-            warehouseCode: values.st_no, slotCode: values.st_bit_no, unitRate: values.unit_rate,
+            warehouseCode: values.st_no, slotCode: lineSlotCode, unitRate: values.unit_rate,
             unitPrice: values.sheet_pri, discount: values.pri_dis, taxFlag: values.tax_sw,
             currency: values.cur_no, invoiceType: values.inv_type, remark: values.rem,
             maxQuantity: values.sheet_qty, quantity: values.sheet_qty,

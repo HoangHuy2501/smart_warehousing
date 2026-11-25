@@ -21,6 +21,8 @@ for (const scenario of [
     { name: 'lấy số còn thiếu của kệ sau khi gửi một phần', imported: 0, draft: 40, slotQty: 40, expected: '60.00000000', reuse: true },
     { name: 'từ chối số lượng vượt mức', imported: 0, draft: 0, input: '101', invalid: true },
     { name: 'từ chối bản xem trước cũ sau khi lượng T8 đổi', imported: 0, draft: 0, stale: true },
+    { name: 'dùng mã vị trí rút gọn trên T8, giữ mã kệ WHS trên form', imported: 0, draft: 0, expected: '100.00000000', shortCode: '03-01' },
+    { name: 'từ chối nếu không có vị trí T8 đang hoạt động', imported: 0, draft: 0, missingSlot: true },
     { name: 'bấm lại sau khi gửi', status: 'SEND_STOCK' },
 ]) {
     test(scenario.name, async (t) => {
@@ -45,7 +47,7 @@ for (const scenario of [
         let changed = false;
         t.mock.method(t8, 'findWaitingPeers', async () => []);
         t.mock.method(t8, 'findSource', async (id, poId, goodsNo, slotCode) => {
-            assert.deepEqual([id, poId, goodsNo, slotCode], [1, 8, 'GOODS', 'A1-1']);
+            assert.deepEqual([id, poId, goodsNo, slotCode], [1, 8, 'GOODS', scenario.shortCode ?? 'A1-1']);
             return {
                 notice_no: 'PN', notice_id: 2, pur_no: 'PO', pur_id: 3, goods_no: 'GOODS',
                 made_lot: 'LOT', sheet_qty: 100, return_qty: 0, match_count: 1, adj_result: '1',
@@ -55,9 +57,9 @@ for (const scenario of [
         });
         t.mock.method(t8, 'findOpenDraft', async () => scenario.reuse ? ['PIGI0001'] : []);
         t.mock.method(t8, 'nextLineId', async () => 7);
-        t.mock.method(t8, 'hasSlot', async (warehouse) => {
+        t.mock.method(t8, 'findActiveSlotCode', async (warehouse) => {
             assert.equal(warehouse, '101');
-            return true;
+            return scenario.missingSlot ? undefined : scenario.shortCode ?? 'A1-1';
         });
         t.mock.method(t8, 'findCreator', async () => ({ user_no: 'EMP', emp_no: null }));
         t.mock.method(t8, 'reserveSheetNumber', async () => 'PSMGI261123001');
@@ -66,11 +68,16 @@ for (const scenario of [
         const update = t.mock.method(allocations, 'updateAllocationIqcSummary', async () => true);
 
         const dto = { actorId: 'EMP', slotCode: 'A1-1' };
+        if (scenario.missingSlot) {
+            await assert.rejects(preview('LOT-ID', dto), /t8_receipt_slot_invalid/);
+            assert.equal(header.mock.callCount(), 0);
+            return;
+        }
         const form = scenario.status ? { revision: 'previous', lines: [] } : await preview('LOT-ID', dto);
         assert.equal(header.mock.callCount(), 0);
         assert.equal(line.mock.callCount(), 0);
         if (!scenario.status) {
-            assert.equal(form.mode, form.lines.length ? 'ENTER_QUANTITY' : 'CONFIRM_EXISTING');
+            assert.equal(form.mode, form.lines.length ? 'CREATE' : 'CONFIRM_EXISTING');
         }
         if (scenario.stale) changed = true;
         const submit = send('LOT-ID', {
@@ -96,7 +103,8 @@ for (const scenario of [
         if (scenario.expected) {
             assert.equal(line.mock.calls[0].arguments[0].sheet_id, scenario.reuse ? 7 : 1);
             assert.equal(line.mock.calls[0].arguments[0].sheet_qty, scenario.expected);
-            assert.equal(line.mock.calls[0].arguments[0].st_bit_no, 'A1-1');
+            assert.equal(form.lines[0].slotCode, 'A1-1');
+            assert.equal(line.mock.calls[0].arguments[0].st_bit_no, scenario.shortCode ?? 'A1-1');
             assert.equal(line.mock.calls[0].arguments[0].st_no, '101');
         }
     });
@@ -152,7 +160,7 @@ test('ghép hai kệ cùng lot và giữ mã vị trí T8 riêng trên từng d�
         match_count: 1, adj_result: '1', draft_qty: 0, slot_qty: 0,
         sheet_pri: 500, unit_rate: 1, pri_dis: 1,
     }));
-    t.mock.method(t8, 'hasSlot', async () => true);
+    t.mock.method(t8, 'findActiveSlotCode', async (_, code) => code);
     t.mock.method(t8, 'findOpenDraft', async () => []);
     t.mock.method(t8, 'findCreator', async () => ({ user_no: 'EMP' }));
     t.mock.method(t8, 'reserveSheetNumber', async () => 'PSMGI261123001');
@@ -176,4 +184,14 @@ test('ghép hai kệ cùng lot và giữ mã vị trí T8 riêng trên từng d�
     assert.deepEqual(result.allocations, [
         { allocationId: 'A', status: 'SEND_STOCK' }, { allocationId: 'B', status: 'SEND_STOCK' },
     ]);
+});
+
+test('tra vị trí T8 theo kho đích, ưu tiên mã đầy đủ rồi đến mã bỏ tiền tố', async () => {
+    const resolved = await t8.findActiveSlotCode('101', 'GIF3-A1-03-01', 'GIF3', async (sql, params) => {
+        assert.match(sql, /act_sw = '1'/);
+        assert.match(sql, /ORDER BY CASE WHEN st_bit_no/);
+        assert.deepEqual(params, ['101', 'GIF3-A1-03-01', 'A1-03-01', 'GIF3-A1-03-01']);
+        return { rows: [{ st_bit_no: 'A1-03-01' }] };
+    });
+    assert.equal(resolved, 'A1-03-01');
 });
