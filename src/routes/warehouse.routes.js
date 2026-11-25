@@ -93,6 +93,17 @@ router.post(
   asyncHandler(controller.injectDecision)
 );
 
+router.get('/lots/:id/t8-receipt', requireAuth, requireWarehouseOperator,
+  asyncHandler(controller.previewSendStock));
+
+router.post(
+  '/lots/:id/t8-receipt',
+  requireAuth,
+  requireWarehouseOperator,
+  requireBodyFields(['slotCode']),
+  asyncHandler(controller.sendStock)
+);
+
 router.post(
   '/lots/:id/move',
   requireAuth,

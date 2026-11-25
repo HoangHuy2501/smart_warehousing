@@ -275,7 +275,7 @@ CREATE TABLE dbo.whs_slot_allocation (
   slot_code           NVARCHAR(20)  NOT NULL CONSTRAINT FK_whs_alloc_slot
                                     REFERENCES dbo.whs_slots (code),
   allocated_qty       NUMERIC(18,8) NOT NULL,
-  status              NVARCHAR(20)  NOT NULL CONSTRAINT DF_whs_alloc_status DEFAULT 'WAITING_IQC', -- WAITING_IQC | IN_STOCK | RETURNED | AOD_PENDING
+  status              NVARCHAR(20)  NOT NULL CONSTRAINT DF_whs_alloc_status DEFAULT 'WAITING_IQC', -- WAITING_IQC | WAITING_STOCK | SEND_STOCK | IN_STOCK | RETURNED | AOD_PENDING
   iqc_decision        NVARCHAR(15)  NULL,       -- PASS | FAIL_PENDING | EXEMPT | PARTIAL_PASS | RETURN | AOD
   has_warning         BIT           NOT NULL CONSTRAINT DF_whs_alloc_warn DEFAULT 0,
   qty_in_stock        NUMERIC(18,8) NULL,
@@ -286,7 +286,10 @@ CREATE TABLE dbo.whs_slot_allocation (
   allocated_by_emp_no NVARCHAR(20)  NOT NULL,
   allocated_at        DATETIME2     NOT NULL,
   closed_at           DATETIME2     NULL,
-  CONSTRAINT CK_whs_alloc_qty CHECK (allocated_qty > 0)
+  CONSTRAINT CK_whs_alloc_qty CHECK (allocated_qty > 0),
+  CONSTRAINT CK_whs_alloc_status CHECK (
+    status IN ('WAITING_IQC', 'WAITING_STOCK', 'SEND_STOCK', 'IN_STOCK', 'RETURNED', 'AOD_PENDING')
+  )
 );
 GO
 

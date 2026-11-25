@@ -13,6 +13,7 @@
 'use strict';
 
 const LotService = require('../services/lot.service');
+const SendStockService = require('../services/send-stock.service');
 const { bindActor } = require('./bind-actor');
 
 // ---- LO HANG (whs_slot_allocation) ----
@@ -37,4 +38,17 @@ const undoLot = async (req, res) => {
   res.status(200).json(await LotService.undoAssign(req.params.id, req.body));
 };
 
-module.exports = { assignShelf, injectDecision, moveLot, undoLot };
+const previewSendStock = async (req, res) => {
+  res.json(await SendStockService.preview(req.params.id, {
+    actorId: req.actor.id,
+    slotCode: req.query.slotCode,
+  }));
+};
+
+const sendStock = async (req, res) => {
+  bindActor(req);
+  const result = await SendStockService.send(req.params.id, req.body);
+  res.status(result.sheetNos.length ? 201 : 200).json(result);
+};
+
+module.exports = { previewSendStock, sendStock, assignShelf, injectDecision, moveLot, undoLot };

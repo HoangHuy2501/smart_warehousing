@@ -6,7 +6,7 @@ const { TABLES } = require('./tables');
 async function findCandidates(cutoff, afterId, limit) {
     const { rows } = await db.query(`
         SELECT id FROM ${TABLES.allocation}
-        WHERE status = 'WAITING_STOCK' AND closed_at IS NULL
+        WHERE status = 'SEND_STOCK' AND closed_at IS NULL
           AND (status_recorded_at IS NULL OR status_recorded_at >= ?)
           AND id > ?
         ORDER BY id

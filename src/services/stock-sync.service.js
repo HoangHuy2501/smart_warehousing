@@ -10,7 +10,7 @@ async function syncAllocation(id) {
     return db.withTransaction(async (tx) => {
         await locks.acquireAllocationLock(id, tx);
         const allocation = await allocations.findAllocationForIqc(id, tx, true);
-        if (!allocation || allocation.closedAt || allocation.status !== 'WAITING_STOCK' ||
+        if (!allocation || allocation.closedAt || allocation.status !== 'SEND_STOCK' ||
             (allocation.statusRecordedAt && new Date(allocation.statusRecordedAt) < previousMonthCutoff())) {
             return 'NO_OP';
         }
@@ -18,11 +18,11 @@ async function syncAllocation(id) {
         const receipts = await allocations.findReceiptsForAllocation(id, tx);
         if (allocation.hasWarning || receipts.some((receipt) =>
             receipt.hasWarning || receipt.qtyInStock == null || !receipt.lotNo?.trim())) {
-            return 'WAITING_STOCK';
+            return 'SEND_STOCK';
         }
         const accepted = receipts.filter((receipt) => receipt.qtyInStock > 0)
             .sort((a, b) => a.noticeDetailId - b.noticeDetailId);
-        if (!accepted.length) return 'WAITING_STOCK';
+        if (!accepted.length) return 'SEND_STOCK';
 
         for (const receipt of accepted) {
             await locks.acquireNoticeLock(receipt.noticeDetailId, tx);
@@ -38,7 +38,7 @@ async function syncAllocation(id) {
             if (!coverage || coverage.lot_no?.trim() !== receipt.lotNo.trim() ||
                 Number(coverage.unresolved_count) !== 0 ||
                 Number(coverage.imported_qty) < Number(coverage.required_qty)) {
-                return 'WAITING_STOCK';
+                return 'SEND_STOCK';
             }
         }
 
