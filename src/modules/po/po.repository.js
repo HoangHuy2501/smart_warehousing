@@ -471,6 +471,7 @@ class PoModel {
     const result = await pagination({
       ...this.purchaseQuery(opts),
       distinctBy: 'poNumber',
+      parallel: true,
       page: opts.page,
       pageSize: opts.pageSize,
       orderBy: '[eta], [poSort], [lotSort]',

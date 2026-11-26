@@ -64,11 +64,7 @@ class SearchServices {
   /**
    * GET /pos — phân trang PO mở + đếm số đơn theo bucket ETA.
    * bucketCounts lọc theo keyword nhưng KHÔNG lọc bucket (FE làm tab).
-   * AUDIT PERFORMANCE 2026-10-19: 2 pipeline tách biệt —
-   *   counts=1 (trang đầu / đổi keyword): LIST pipeline hẹp (bucket +
-   *   keyword push sớm vào #PO) + COUNT pipeline rộng (không bucket).
-   *   counts=0 (phân trang): CHỈ list pipeline — không chạy lại đếm
-   *   bucket (nặng) khi chỉ next trang.
+   * Danh sách và các số đếm chạy đồng thời.
    *
    * @param {object} query - { keyword?, bucket?, page?, pageSize?, counts? }
    * @param {object} actor - Session người gọi (KEEPER bị scope NPL active)
@@ -94,11 +90,13 @@ class SearchServices {
       page,
       pageSize,
     };
-    const { rows, total, poTotal } = await PoRepository.searchPurchases(base);
+    const [{ rows, total, poTotal }, counts] = await Promise.all([
+      PoRepository.searchPurchases(base),
+      wantCounts ? PoRepository.countPurchaseBuckets(base) : null,
+    ]);
     const items = rows.map(({ poSort, lotSort, ...row }) => ({ ...row, source: 'mock' }));
     const response = { items, total, poTotal: Number(poTotal), page, pageSize };
-    if (wantCounts) {
-      const counts = await PoRepository.countPurchaseBuckets(base);
+    if (counts) {
       response.bucketCounts = Object.fromEntries(counts.map(({ bucket, n }) => [bucket, Number(n)]));
     }
     return response;
