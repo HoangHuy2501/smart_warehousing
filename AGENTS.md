@@ -12,24 +12,21 @@ Tài liệu này là quy tắc làm việc cho AI (Codex, Cursor, Copilot và c�
 ## Cấu trúc thư mục
 
 ```text
-project/
-├── public/                # Ảnh và static assets công khai
-├── src/
-│   ├── config/            # DB, Redis, Axios, Swagger, third-party clients
-│   ├── controller/        # HTTP request/response handlers
-│   ├── middleware/        # Authentication, authorization, validation, errors
-│   ├── repository/        # Database queries và data access
-│   ├── routes/            # HTTP method, path, middleware, controller binding
-│   ├── services/          # Business logic và phối hợp repository/API
-│   ├── util/              # Helpers dùng chung, độc lập nghiệp vụ
-│   ├── worker/            # Cron jobs, background jobs, queue consumers
-│   ├── app.js             # Cấu hình Express application
-│   └── server.js          # Bootstrap và app.listen
-├── .env.example           # Tên biến cấu hình, không chứa secrets
-└── package.json
+src/
+├── app.js, server.js, ngrok.js
+├── config/                  # Kết nối DB, cấu hình môi trường và tên bảng
+├── middleware/              # Xác thực, phân quyền và xử lý HTTP chung
+├── routes/                  # Đăng ký các nhóm dưới /api/warehouse
+├── shared/, util/           # Thành phần dùng chung giữa các nghiệp vụ
+└── modules/
+    └── <nghiệp vụ>/         # Route, controller, service và repository
+                             # Queue, job và worker của nghiệp vụ nếu có
+db/                          # Schema, migration và SQL bảo trì
+docs/                        # Swagger và tài liệu vận hành
+test/                        # Các kiểm tra hiện có
 ```
 
-Đây là cấu trúc định hướng. Dự án có thể đang dùng `routes` (số nhiều), `controller` (số ít), hoặc tên khác. **Giữ đúng tên thư mục đang tồn tại**, không tạo folder đồng nghĩa nếu không cần thiết.
+Mỗi repository đặt SQL ngay trong file của nghiệp vụ và gọi bộ kết nối chung. Bộ kết nối bind tham số và giữ transaction, thời hạn SQL và chế độ kết nối của ứng dụng. Service điều phối nghiệp vụ. Khi cần DAL cho một chức năng, tìm theo route trong `src/modules/<nghiệp vụ>/<nghiệp vụ>.routes.js`.
 
 ## Trách nhiệm từng tầng
 

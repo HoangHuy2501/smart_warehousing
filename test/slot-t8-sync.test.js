@@ -5,11 +5,11 @@ process.env.DB_MODE = 'memory';
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const db = require('../src/config/db');
-const { shared } = require('../src/services/shared');
-const slots = require('../src/repository/sql/slot.repository');
-const accounts = require('../src/repository/sql/account.repository');
-const t8 = require('../src/repository/sql/t8-slot.repository');
-const service = require('../src/services/slot.service');
+const { shared } = require('../src/shared/shared');
+const slots = require('../src/modules/slots/slot.repository');
+const accounts = require('../src/modules/accounts/account.repository');
+const t8 = require('../src/modules/slots/t8-slot.repository');
+const service = require('../src/modules/slots/slot.service');
 
 const code = 'GIF3-A1-01-06';
 const nextCode = 'GIF3-A1-01-07';

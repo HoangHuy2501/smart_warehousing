@@ -4,10 +4,10 @@ process.env.DB_MODE = 'memory';
 
 const assert = require('node:assert/strict');
 const { test } = require('node:test');
-const accounts = require('../src/services/account.service');
-const dashboard = require('../src/services/it-dashboard.service');
-const employees = require('../src/repository/sql/t8.repository');
-const roles = require('../src/repository/sql/account.repository');
+const accounts = require('../src/modules/accounts/account.service');
+const dashboard = require('../src/modules/dashboard/it-dashboard.service');
+const employees = require('../src/modules/t8/t8.repository');
+const roles = require('../src/modules/accounts/account.repository');
 
 test('IT can create and reset all roles with a password-free audit trail', async () => {
   await roles.insert({ employeeCode: 'IT-TEST', role: 'IT', active: true });

@@ -5,9 +5,9 @@ const assert = require('node:assert/strict');
 const { setTimeout: delay } = require('node:timers/promises');
 const webPush = require('web-push');
 const redisModule = require('../src/util/worker/redis');
-const subscriptions = require('../src/repository/sql/push-subscription.repository');
-const outbound = require('../src/services/outbound.service');
-const devices = require('../src/services/push-device.service');
+const subscriptions = require('../src/modules/outbound/push-subscription.repository');
+const outbound = require('../src/modules/outbound/outbound.service');
+const devices = require('../src/modules/outbound/push-device.service');
 
 test('delivers to Android and iOS per device concurrently to all devices with independent retries', async (t) => {
     const logs = [];
@@ -61,7 +61,7 @@ test('delivers to Android and iOS per device concurrently to all devices with in
             active -= 1;
         }
     });
-    const { processOutboundPush } = require('../src/services/jobs/outbound-push.job');
+    const { processOutboundPush } = require('../src/modules/outbound/outbound-push.job');
     await assert.rejects(processOutboundPush({ data: { sheetNo: 'OUT-1' } }), /outbound_push_delivery_failed/);
     assert.equal(sentTo.length, 18);
     assert.equal(maxActive, recipients.length);

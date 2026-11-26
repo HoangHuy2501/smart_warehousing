@@ -11,7 +11,7 @@ require('dotenv').config({ path: require('path').join(__dirname, '..', '.env') }
 const http = require('http');
 const app = require('./app');
 const db = require('./config/db');
-const { ensureStartup } = require('./repository');
+const { ensureStartup } = require('./modules/accounts/account-startup.service');
 
 /**
  * Ping DB ngay khi server len de biet ket noi thanh cong hay chua.
@@ -42,8 +42,7 @@ async function logDbConnectionStatus() {
   }
 }
 
-// Khoi dong repository layer (chen tai khoan test raw — idempotent, xem
-// repository/index.js). Chay nen khong chan listen; loi chi duoc log.
+// Khởi tạo tài khoản đã cấu hình trong nền, không chặn HTTP server.
 ensureStartup().catch((error) => {
   console.error('[startup] repository init failed:', error.message);
 });

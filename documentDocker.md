@@ -1,6 +1,6 @@
 # Docker Compose cho môi trường development
 
-Compose chạy đúng bốn service: `app`, `redis`, `receipt-worker` và `ngrok`. Entrypoint API là `src/server.js`; worker là `src/worker/receipt-sync.worker.js`. API và worker đọc `.env`, dùng cùng SQL Server và Redis. Ngrok chuyển tiếp HTTPS công khai vào `app:3000` trên mạng Docker.
+Compose chạy đúng bốn service: `app`, `redis`, `receipt-worker` và `ngrok`. Entrypoint API là `src/server.js`; worker là `src/modules/lots/receipt-sync.worker.js`. API và worker đọc `.env`, dùng cùng SQL Server và Redis. Ngrok chuyển tiếp HTTPS công khai vào `app:3000` trên mạng Docker.
 
 Trước khi chạy, mở Docker Desktop và điền `.env` theo `.env.example`: `MSSQL_HOST`, `MSSQL_PORT`, `MSSQL_DATABASE`, `MSSQL_USER`, `MSSQL_PASSWORD`, `JWT_SECRET`, `REDIS_PASSWORD` và `NGROK_AUTHTOKEN`. Nếu SQL Server nằm trên máy chạy Docker Desktop, dùng `MSSQL_HOST=host.docker.internal`; `localhost` trong container không trỏ về máy Windows. Compose không tạo hoặc sửa schema SQL Server.
 

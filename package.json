@@ -6,10 +6,10 @@
     "start": "concurrently -k \"npm:server\" \"npm:ngrok\"",
     "server": "node src/server.js",
     "ngrok": "node src/ngrok.js",
-    "worker:receipt": "node src/worker/receipt-sync.worker.js",
-    "worker:iqc": "node src/worker/iqc-sync.worker.js",
-    "worker:stock": "node src/worker/stock-sync.worker.js",
-    "worker:outbound": "node src/worker/outbound.worker.js"
+    "worker:receipt": "node src/modules/lots/receipt-sync.worker.js",
+    "worker:iqc": "node src/modules/iqc/iqc-sync.worker.js",
+    "worker:stock": "node src/modules/inbound/stock-sync.worker.js",
+    "worker:outbound": "node src/modules/outbound/outbound.worker.js"
   },
   "dependencies": {
     "@bull-board/api": "^9.10.5",
