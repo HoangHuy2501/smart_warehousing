@@ -13,7 +13,7 @@ function positiveInt(value, fallback, max = Number.MAX_SAFE_INTEGER) {
 
 async function pagination({
   query, params = [], page, pageSize, orderBy = '(SELECT NULL)',
-  count = true, countQuery, countParams = params, withSql = '', execute = db.query,
+  count = true, distinctBy, withSql = '',
 }) {
   const currentPage = positiveInt(page, 1);
   const limit = positiveInt(pageSize, 20, 500);
@@ -23,35 +23,45 @@ async function pagination({
   if (typeof orderBy !== 'string' || !orderBy.trim()) throw new Error('ORDER BY is required');
 
   const base = query.trim().replace(/;+\s*$/, '');
-  const countExpression = execute === db.query && db.getDialect() === 'pg'
-    ? 'COUNT(*) AS "totalItems"'
-    : 'COUNT_BIG(*) AS [totalItems]';
-  let totals;
+  const from = `FROM (${base}) AS pg_source`;
+  const pg = db.getDialect() === 'pg';
+  const countFunction = pg ? 'COUNT' : 'COUNT_BIG';
+  const totalAlias = pg ? '"totalItems"' : '[totalItems]';
+  if (distinctBy !== undefined && !/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(distinctBy)) {
+    throw new Error('Invalid distinct count column');
+  }
+  const distinctCount = distinctBy
+    ? `, COUNT(DISTINCT pg_source.${pg ? '"' + distinctBy + '"' : '[' + distinctBy + ']'}) AS ${pg ? '"totalDistinct"' : '[totalDistinct]'}`
+    : '';
+  let totalDistinct = null;
   let totalItems = null;
   if (count) {
-    const { rows } = await execute(countQuery ??
-      `${withSql} SELECT ${countExpression} FROM (${base}) AS pg_source`, countParams);
-    totals = rows[0];
-    totalItems = Number(totals?.totalItems ?? totals?.total ?? 0);
-    if (!Number.isSafeInteger(totalItems)) throw new Error('Total count exceeds safe JS integer range');
+    const { rows } = await db.query(`
+      ${withSql}
+      SELECT ${countFunction}(*) AS ${totalAlias}${distinctCount}
+      ${from};
+    `, params);
+    totalItems = Number(rows[0].totalItems);
+    if (distinctBy) totalDistinct = Number(rows[0].totalDistinct);
+    if (!Number.isSafeInteger(totalItems) || (distinctBy && !Number.isSafeInteger(totalDistinct))) throw new Error('Total count exceeds safe JS integer range');
   }
 
   const { rows: data } = totalItems !== null && offset >= totalItems
     ? { rows: [] }
-    : await execute(`${withSql}
+    : await db.query(`${withSql}
         SELECT *
-        FROM (${base}) AS pg_source
+        ${from}
         ORDER BY ${orderBy}
         OFFSET ? ROWS FETCH NEXT ? ROWS ONLY;
       `, [...params, offset, limit]);
 
   return {
     data,
-    totals,
     pagination: {
       page: currentPage,
       pageSize: limit,
       totalItems,
+      totalDistinct,
       totalPages: totalItems === null ? null : Math.ceil(totalItems / limit),
       hasNextPage: totalItems === null ? data.length === limit : offset + limit < totalItems,
       hasPreviousPage: currentPage > 1,

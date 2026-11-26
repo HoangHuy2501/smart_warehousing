@@ -13,7 +13,7 @@ test('PO ETA totals use the same filters as the list without page limits', async
     t.mock.method(db, 'query', async (sql, params = []) => {
         assert.equal((sql.match(/\?/g) ?? []).length, params.length);
         calls.push({ sql, params });
-        if (sql.includes('AS [poTotal]')) return { rows: [{ total: 17, poTotal: 9 }] };
+        if (sql.includes('AS [totalDistinct]')) return { rows: [{ totalItems: 17, totalDistinct: 9 }] };
         if (sql.includes('OFFSET')) return { rows: [{ id: '14' }] };
         if (sql.includes('FROM bucketed')) return { rows: [{ bucket: 'overdue', n: 9 }] };
         return { rows: [] };
@@ -24,7 +24,7 @@ test('PO ETA totals use the same filters as the list without page limits', async
         next3End: '2026-11-29', next7End: '2026-12-03',
     };
     assert.deepEqual(await repo.searchPurchases(filters), { rows: [{ id: '14' }], total: 17, poTotal: 9 });
-    const count = calls.find(({ sql }) => sql.includes('AS [poTotal]'));
+    const count = calls.find(({ sql }) => sql.includes('AS [totalDistinct]'));
     const list = calls.find(({ sql }) => sql.includes('OFFSET'));
     assert.equal(calls.length, 2);
     assert.doesNotMatch(count.sql, /OFFSET|CREATE TABLE|INTO #/);

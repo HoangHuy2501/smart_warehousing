@@ -118,10 +118,36 @@ function searchParams(opts) {
 }
 
 // Dùng cùng điều kiện cho COUNT, danh sách phân trang và danh sách đầy đủ.
-const INCOMING_PO_FILTER = `
+// GET /api/warehouse/incoming-pos — dòng PO còn mở.
+const INCOMING_PO_SELECT = `
+    SELECT
+      CAST(o2.id AS VARCHAR(20)) AS [id],
+      o1.sheet_no AS [poNumber],
+      CAST(o2.id AS VARCHAR(20)) AS [poLine],
+      o2.goods_no AS [itemCode],
+      g.goods_name AS [material],
+      o1.su_name11 AS [supplier],
+      CAST(o2.sheet_qty AS FLOAT) AS [qty],
+      o2.unit_no AS [unit],
+      CAST(o2.sheet_pri AS FLOAT) AS [unitPrice],
+      CAST(CASE WHEN o1.check_sta = 'Y' THEN 1 ELSE 0 END AS BIT) AS [confirmed],
+      o2.del_date AS [eta],
+      CAST(CASE WHEN EXISTS (
+        SELECT 1 FROM pur_in2 i
+        WHERE i.pur_no = o1.sheet_no AND i.pur_id = o2.sheet_id
+          AND i.goods_no = o2.goods_no
+      ) THEN 1 ELSE 0 END AS BIT) AS [arrived],
+      (SELECT MAX(i.sheet_no) FROM pur_in2 i
+       WHERE i.pur_no = o1.sheet_no AND i.pur_id = o2.sheet_id
+         AND i.goods_no = o2.goods_no) AS [grnRef],
+      CAST(NULL AS VARCHAR(40)) AS [lotNo],
+      CAST(COALESCE((
+        SELECT SUM(a.allocated_qty) FROM whs_slot_allocation a WHERE a.po_id = o2.id
+      ), 0) AS FLOAT) AS [assignedQty]
     FROM pur_order2 o2
     JOIN pur_order1 o1 ON o1.sheet_no = o2.sheet_no
     JOIN sys_userpass u ON u.user_no = o1.create_user AND u.user_name <> 'ADM'
+    LEFT JOIN bas_goods g ON g.goods_no = o2.goods_no
     WHERE o1.close_sw IN ('N', '0')
       AND o1.sheet_sta <> '0'
       AND (
@@ -132,50 +158,12 @@ const INCOMING_PO_FILTER = `
       )
 `;
 
-// GET /api/warehouse/incoming-pos — dòng PO còn mở.
-const INCOMING_PO_ROWS = `
-    WITH PoRows AS (
-      SELECT o2.id AS po_id, o2.sheet_id AS po_sheet_id,
-             o1.sheet_no, o2.goods_no, o1.su_name11, o2.sheet_qty,
-             o2.unit_no, o2.sheet_pri, o1.check_sta, o1.close_sw, o2.del_date
-      ${INCOMING_PO_FILTER}
-    )
-`;
-
-const INCOMING_PO_SELECT = `
-    SELECT
-      CAST(p.po_id AS VARCHAR(20)) AS [id],
-      p.sheet_no AS [poNumber],
-      CAST(p.po_id AS VARCHAR(20)) AS [poLine],
-      p.goods_no AS [itemCode],
-      g.goods_name AS [material],
-      p.su_name11 AS [supplier],
-      CAST(p.sheet_qty AS FLOAT) AS [qty],
-      p.unit_no AS [unit],
-      CAST(p.sheet_pri AS FLOAT) AS [unitPrice],
-      CAST(CASE WHEN p.check_sta = 'Y' THEN 1 ELSE 0 END AS BIT) AS [confirmed],
-      p.del_date AS [eta],
-      CAST(CASE WHEN EXISTS (
-        SELECT 1 FROM pur_in2 i
-        WHERE i.pur_no = p.sheet_no AND i.pur_id = p.po_sheet_id
-          AND i.goods_no = p.goods_no
-      ) THEN 1 ELSE 0 END AS BIT) AS [arrived],
-      (SELECT MAX(i.sheet_no) FROM pur_in2 i
-       WHERE i.pur_no = p.sheet_no AND i.pur_id = p.po_sheet_id
-         AND i.goods_no = p.goods_no) AS [grnRef],
-      CAST(NULL AS VARCHAR(40)) AS [lotNo],
-      CAST(COALESCE((
-        SELECT SUM(a.allocated_qty) FROM whs_slot_allocation a WHERE a.po_id = p.po_id
-      ), 0) AS FLOAT) AS [assignedQty]
-    FROM PoRows p
-    LEFT JOIN bas_goods g ON g.goods_no = p.goods_no
-`;
-
 // GET /api/warehouse/pos — nguồn chung cho danh sách và số đếm.
 const PO_SEARCH_ELIGIBLE_SQL = `
     WITH
+    -- PO mở trong phạm vi quyền và bộ lọc hiện tại.
     candidate_po AS (
-      SELECT
+    SELECT
       o2.id AS po_id,
       o1.sheet_no AS po_number,
       o1.su_name11 AS supplier,
@@ -260,8 +248,9 @@ const PO_SEARCH_ELIGIBLE_SQL = `
         )
       )
     ),
+    -- Tạm nhập khớp đúng dòng PO.
     candidate_notice AS (
-      SELECT
+    SELECT
       n2.id AS notice_id,
       p.po_id AS po_id,
       n2.pur_no AS pur_no,
@@ -280,8 +269,9 @@ const PO_SEARCH_ELIGIBLE_SQL = `
      AND ((n2.def02 IS NULL AND p.def02 IS NULL) OR n2.def02 = p.def02)
     LEFT JOIN pur_notice1 n1 ON n1.sheet_no = n2.sheet_no
     ),
+    -- Phiếu nhập của các PO đang xét.
     candidate_receipt AS (
-      SELECT DISTINCT
+    SELECT DISTINCT
       i2.pur_no AS pur_no,
       i2.goods_no AS goods_no,
       i2.made_lot AS made_lot,
@@ -421,9 +411,8 @@ class PoModel {
   // GET /api/warehouse/incoming-pos (không phân trang).
   async list() {
     const { rows } = await db.query(toDialect(`
-      ${INCOMING_PO_ROWS}
       ${INCOMING_PO_SELECT}
-      ORDER BY p.close_sw, p.del_date, p.po_id;
+      ORDER BY o1.close_sw, o2.del_date, o2.id;
     `));
     return rows;
   }
@@ -432,8 +421,6 @@ class PoModel {
   async listPaged(page, pageSize) {
     const result = await pagination({
       query: toDialect(INCOMING_PO_SELECT),
-      withSql: toDialect(INCOMING_PO_ROWS),
-      countQuery: toDialect(`SELECT COUNT_BIG(*) AS [total] ${INCOMING_PO_FILTER};`),
       orderBy: toDialect('[eta], [id]'),
       page,
       pageSize,
@@ -744,42 +731,39 @@ class PoModel {
   // GET /api/warehouse/pos — danh sách và tổng số dòng khớp bộ lọc.
   async searchPurchases(opts) {
     const sp = searchParams(opts);
-    const filterSql = `FROM eligible u WHERE ${PO_SEARCH_KEYWORD_SQL}`;
     const filterParams = [...poCandidateParams(sp), ...poSearchKeywordParams(sp)];
     const result = await pagination({
       query: toDialect(`
     SELECT
-    u.id AS [id],
-    CAST(u.po_id AS VARCHAR(20)) AS [poLine],
-    u.po_number AS [poNumber],
-    u.item_code AS [itemCode],
-    u.material AS [material],
-    u.supplier AS [supplier],
-    CAST(u.qty AS FLOAT) AS [qty],
-    CAST(u.sheet_qty AS FLOAT) AS [sheetQty],
-    u.unit AS [unit],
-    CAST(u.unit_price AS FLOAT) AS [unitPrice],
-    CAST(CASE WHEN u.confirmed = 1 THEN 1 ELSE 0 END AS BIT) AS [confirmed],
-    u.eta AS [eta],
-    CAST(CASE WHEN u.arrived = 1 THEN 1 ELSE 0 END AS BIT) AS [arrived],
-    u.grn_ref AS [grnRef],
-    u.lot_no AS [lotNo],
-    CAST(u.assigned_qty AS FLOAT) AS [assignedQty],
-    u.po_sort AS [poSort],
-    u.lot_sort AS [lotSort]
-    ${filterSql}
+      u.id AS [id],
+      CAST(u.po_id AS VARCHAR(20)) AS [poLine],
+      u.po_number AS [poNumber],
+      u.item_code AS [itemCode],
+      u.material AS [material],
+      u.supplier AS [supplier],
+      CAST(u.qty AS FLOAT) AS [qty],
+      CAST(u.sheet_qty AS FLOAT) AS [sheetQty],
+      u.unit AS [unit],
+      CAST(u.unit_price AS FLOAT) AS [unitPrice],
+      CAST(CASE WHEN u.confirmed = 1 THEN 1 ELSE 0 END AS BIT) AS [confirmed],
+      u.eta AS [eta],
+      CAST(CASE WHEN u.arrived = 1 THEN 1 ELSE 0 END AS BIT) AS [arrived],
+      u.grn_ref AS [grnRef],
+      u.lot_no AS [lotNo],
+      CAST(u.assigned_qty AS FLOAT) AS [assignedQty],
+      u.po_sort AS [poSort],
+      u.lot_sort AS [lotSort]
+    FROM eligible u
+    WHERE ${PO_SEARCH_KEYWORD_SQL}
       `),
       withSql: toDialect(PO_SEARCH_ELIGIBLE_SQL),
-      countQuery: toDialect(`${PO_SEARCH_ELIGIBLE_SQL}
-        SELECT COUNT_BIG(*) AS [total], COUNT(DISTINCT u.po_number) AS [poTotal]
-        ${filterSql};
-      `),
+      distinctBy: 'poNumber',
       params: filterParams,
       page: opts.page,
       pageSize: opts.pageSize,
       orderBy: toDialect('[eta], [poSort], [lotSort]'),
     });
-    return { rows: result.data, total: result.pagination.totalItems, poTotal: result.totals?.poTotal ?? 0 };
+    return { rows: result.data, total: result.pagination.totalItems, poTotal: result.pagination.totalDistinct };
   }
 
   /**
