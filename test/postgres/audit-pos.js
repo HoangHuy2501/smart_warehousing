@@ -1,19 +1,19 @@
 'use strict';
 /**
  * AUDIT 2026-10-19 — Chung minh hanh vi GET /pos tren sandbox PG.
- * KHONG sua code san pham. Chay: node test/audit-pos.js
+ * KHONG sua code san pham. Chay: node test/postgres/audit-pos.js
  */
 
-process.env.DB_MODE = 'test-postgres';
+require('./register');
 process.env.DB_TABLE_PREFIX = 'whs3_';
 
 async function main() {
-  const db = require('../src/config/db');
+  const db = require('../../src/config/db');
   // 1) Kiem tra seed con du lieu (khong reset — doc thu du lieu hien tai)
   const check = await db.query('SELECT COUNT(*)::int AS n FROM whs3_t8_pur_order2', []);
   console.log('[data] t8_pur_order2 rows =', check.rows[0].n);
 
-  const PoRepository = require('../src/modules/po/po.repository');
+  const PoRepository = require('../../src/modules/po/po.repository');
 
   const t = (() => {
     const d = new Date();

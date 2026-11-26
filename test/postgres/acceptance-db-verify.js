@@ -3,7 +3,7 @@
  * acceptance-final-whs.test.js). Kiem tra CCacs diem khong thay qua API:
  * warehouse_status, receipt tao/khong tao, activity po_id, T8 khong bi ghi.
  *
- * Cach chay: node test/acceptance-db-verify.js
+ * Cach chay: node test/postgres/acceptance-db-verify.js
  */
 'use strict';
 

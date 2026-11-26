@@ -200,7 +200,7 @@ IQC chỉ đọc T8, chỉ cập nhật dữ liệu WHS và không tạo GRN hay
 Endpoint IQC thủ công trả 403 trong `DB_MODE=sqlserver`.
 
 Chạy bộ kiểm thử với PostgreSQL sandbox đã có fixture schema bằng
-`DB_MODE=test-postgres node test/iqc-sync.test.js`.
+`node test/postgres/iqc-sync.test.js`.
 
 ## Web Push xuất kho
 

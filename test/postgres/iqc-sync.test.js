@@ -16,25 +16,25 @@
  *
  * Cách chạy:
  *   cd smart_whs_v3
- *   DB_MODE=test-postgres node test/iqc-sync.test.js
+ *   node test/postgres/iqc-sync.test.js
  */
 
 'use strict';
 
-process.env.DB_MODE = process.env.DB_MODE || 'test-postgres';
+require('./register');
 
 const fs = require('fs');
 const path = require('path');
 
-const db = require('../src/config/db');
-const { TABLES } = require('../src/config/tables');
-const IqcSyncRepository = require('../src/modules/iqc/iqc-sync.repository');
-const iqcSyncService = require('../src/modules/iqc/iqc-sync.service');
-const { syncAllocation: syncStock } = require('../src/modules/inbound/stock-sync.service');
-const stockRepository = require('../src/modules/inbound/stock-sync.repository');
-const { previousMonthCutoff } = require('../src/util/month-cutoff');
-const OverviewService = require('../src/modules/dashboard/overview.service');
-const { manualIqcDisabled } = require('../src/modules/lots/lot.service');
+const db = require('../../src/config/db');
+const { TABLES } = require('../../src/config/tables');
+const IqcSyncRepository = require('../../src/modules/iqc/iqc-sync.repository');
+const iqcSyncService = require('../../src/modules/iqc/iqc-sync.service');
+const { syncAllocation: syncStock } = require('../../src/modules/inbound/stock-sync.service');
+const stockRepository = require('../../src/modules/inbound/stock-sync.repository');
+const { previousMonthCutoff } = require('../../src/util/month-cutoff');
+const OverviewService = require('../../src/modules/dashboard/overview.service');
+const { manualIqcDisabled } = require('../../src/modules/lots/lot.service');
 
 const STATES = iqcSyncService.IQC_SYNC_STATES;
 
@@ -73,7 +73,7 @@ const IQC_SOURCE_FILES = [
     'src/modules/iqc/iqc-sync.worker.js',
     'src/modules/iqc/iqc-sync.repository.js',
     'src/modules/iqc/iqc-sync.queue.js',
-].map((file) => path.join(__dirname, '..', file));
+].map((file) => path.join(__dirname, '..', '..', file));
 
 /** Tìm (hoặc tạo) 1 kệ dùng cho allocation test. */
 async function ensureSlot() {

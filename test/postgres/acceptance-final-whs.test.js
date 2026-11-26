@@ -3,7 +3,7 @@
  * Chay voi server o che do test-postgres + DB_TABLE_PREFIX=whs3_ (PORT=3111)
  * hoac memory (PORT=3112). Cases A-F theo yeu cau user.
  *
- * Cach chay: node test/acceptance-final-whs.test.js [baseUrl]
+ * Cach chay: node test/postgres/acceptance-final-whs.test.js [baseUrl]
  */
 'use strict';
 
