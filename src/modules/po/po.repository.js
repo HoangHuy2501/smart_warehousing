@@ -377,10 +377,11 @@ class PoModel {
         COALESCE(n.sheet_qty, 0) + COALESCE(n.sheet_qty1, 0), 0
       ) AS FLOAT) AS [r_total_fail_qty],
       CASE
-        WHEN receipt.approved = 1 THEN N'Đã nhập kho chính thức'
-        WHEN receipt.approved = 0 THEN N'Đã gửi yêu cầu nhập kho chính thức'
-        WHEN n.sheet_sta1 = '1' THEN N'Đã kiểm IQC'
-        WHEN n.id IS NOT NULL THEN N'Đang đợi kiểm IQC'
+        WHEN receipt.approved = 1 THEN N'IN_STOCK'
+        WHEN receipt.approved = 0 THEN N'SEND_STOCK'
+        WHEN n.sheet_sta1 = '1' and (v.adj_result = '1' or v.adj_result = '3')  THEN N'WAITING_STOCK'
+        WHEN n.sheet_sta1 = '1' and v.adj_result = '2'  THEN N'RETURNED'
+        WHEN n.id IS NOT NULL THEN N'WAITING_IQC'
         WHEN eta.days_late > 0 THEN N'Lô hàng trễ hẹn'
         WHEN eta.days_late BETWEEN -3 AND -1 THEN N'Lô hàng dự kiến sắp về'
         WHEN eta.days_late = 0 THEN N'Lô hàng dự kiến về hôm nay'
@@ -395,6 +396,7 @@ class PoModel {
       AND n.goods_no = o.goods_no
       AND (n.def02 = o.def02 OR (n.def02 IS NULL AND o.def02 IS NULL))
     LEFT JOIN pur_notice1 n1 ON n1.sheet_no = n.sheet_no
+    LEFT join v_pur_notice_detail v on v.sheet_no = n.sheet_no and v.made_lot=n.made_lot
     OUTER APPLY (
       -- Một dòng tạm nhập có thể có nhiều phiếu nhập.
       SELECT MAX(i.sheet_no) AS grn_ref,
