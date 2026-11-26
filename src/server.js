@@ -15,7 +15,7 @@ const { ensureStartup } = require('./modules/accounts/account-startup.service');
 
 /**
  * Ping DB ngay khi server len de biet ket noi thanh cong hay chua.
- * - sqlserver / test-postgres: chay SELECT 1, log kem mode + dialect + thoi gian.
+ * - chay SELECT 1, log kem mode + dialect + thoi gian.
  * Khong chặn listen; that bai chi log loi (server van len de nhin that tu log).
  */
 async function logDbConnectionStatus() {

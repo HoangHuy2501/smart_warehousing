@@ -12,4 +12,3 @@ db/
 docs/*
 !docs/swagger.spec.js
 test/*
-!test/db.test.config.js
