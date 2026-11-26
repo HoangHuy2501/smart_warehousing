@@ -35,11 +35,8 @@
 
 'use strict';
 
-const { toApiPo, toApiActivity } = require('../../shared/mappers');
+const { toApiActivity } = require('../../shared/mappers');
 const { computeBucketDates } = require('../../util/bucket-dates');
-// @type cho từng require: module.exports repository bị swap theo DB_MODE
-// (memory slice / new XxxModel()) nên editor không tự suy ra kiểu — gắn
-// JSDoc để go-to-definition / F12 nhảy thẳng sang method của class.
 /** @type {import('./po.repository').PoModel} */
 const PoRepository = require('./po.repository');
 /** @type {import('../slots/slot.repository').SlotModel} */
@@ -86,7 +83,6 @@ class SearchServices {
     const pageSize = parsePageSize(query.pageSize, 15);
     const wantCounts = String(query.counts ?? '1') !== '0';
     // Biến bucket mới (2026-10-20): hàm dùng chung bucket-dates.js —
-    // SQL mode và memory mode KHÔNG bao giờ lệch boundary.
     const ranges = computeBucketDates();
     const base = {
       keyword: kw,
@@ -98,25 +94,14 @@ class SearchServices {
       page,
       pageSize,
     };
-    if (!wantCounts) {
-      const { rows, total, poTotal } = await PoRepository.searchPurchases(base);
-      return { items: rows.map(toApiPo), total, poTotal, page, pageSize };
-    }
-    // Điều phối 2 pipeline (refactor 2026-10-26): LIST (pipeline hẹp
-    // — bucket + keyword push sớm) rồi BUCKETS (pipeline rộng — không
-    // bucket). Thứ tự gọi giữ nguyên như searchPurchasesWithBuckets cũ
-    // của repository; kết quả hai mode (sql / memory) không đổi vì cả
-    // hai method đều dùng cùng bộ filter gốc.
     const { rows, total, poTotal } = await PoRepository.searchPurchases(base);
-    const buckets = await PoRepository.countPurchaseBuckets(base);
-    return {
-      items: rows.map(toApiPo),
-      total,
-      poTotal,
-      page,
-      pageSize,
-      bucketCounts: buckets,
-    };
+    const items = rows.map(({ poSort, lotSort, ...row }) => ({ ...row, source: 'mock' }));
+    const response = { items, total, poTotal: Number(poTotal), page, pageSize };
+    if (wantCounts) {
+      const counts = await PoRepository.countPurchaseBuckets(base);
+      response.bucketCounts = Object.fromEntries(counts.map(({ bucket, n }) => [bucket, Number(n)]));
+    }
+    return response;
   }
 
   /**

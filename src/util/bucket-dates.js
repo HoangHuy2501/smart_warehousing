@@ -1,9 +1,7 @@
 'use strict';
 
 /**
- * Bien bucket ETA cua GET /pos (2026-10-20) — HAM DUNG CHUNG cho
- * SQL mode (search.service) va memory mode (memory.repository) de
- * 2 mode KHONG BAO GIO lech boundary.
+ * Các mốc ngày dự kiến cho GET /pos.
  *
  * 5 moc date-only YYYY-MM-DD (tinh theo ngay chay server):
  *   today             = hom nay
@@ -51,10 +49,7 @@ function computeBucketDates(now = new Date()) {
 }
 
 /**
- * Đồng hồ tạm nhập 24h (2026-10-28) — dùng chung cho SQL mode (đối ứng
- * DATEADD(HOUR, -24, GETDATE()) trong po.repository) và memory mode
- * (memory.repository) để 2 mode KHÔNG BAO GIỜ lệch mốc: lô tạm nhập quá
- * 24h kể từ notice1.create_date thì ẩn khỏi /pos và /incoming-pos.
+ * Mốc 24 giờ để lọc phiếu tạm nhập.
  */
 const NOTICE_CLOCK_MS = 24 * 60 * 60 * 1000;
 

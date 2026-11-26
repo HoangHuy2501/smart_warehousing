@@ -2,38 +2,11 @@
 
 const { ACCOUNT_AUDIT_ACTIONS } = require('../../config/account-audit');
 
-/**
- * Repository bảng whs_activity (nhật ký hoạt động).
- *
- * Kiến trúc (refactor 2026-10-26 lần 2 theo yêu cầu user — SQL thực thi
- * trực tiếp trong method, không còn tầng hàm sqlXxx/exec): ActivityModel
- * là class singleton (module.exports = new); MỖI public method tự khai
- * báo câu SQL ngay trong method và tự gọi
- * db.query(toDialect(sql), params). Tham số bind QUA PLACEHOLDER `?` —
- * db.js tự đổi thành @p1.. (SQL Server) hoặc $1.. (PostgreSQL), tuyệt đối
- * KHÔNG nối giá trị trực tiếp vào chuỗi SQL. Alias [camelCase] giữ đúng
- * shape service/FE cần — SQL tự alias đủ nên KHÔNG cần row-mapper.
- *
- * Test SSMS: copy câu SQL (kèm comment -- DECLARE) sang SSMS, uncomment
- * dòng DECLARE, thay ? bằng biến tương ứng là chạy được ngay.
- *
- * DUAL DIALECT (SQL Server production + PostgreSQL sandbox test):
- * SQL viết theo cú pháp SQL Server; toDialect() chỉ chuyển 3 chỗ PG
- * không chấp nhận nguyên văn (xem JSDoc của toDialect). Phân trang dùng
- * cú pháp chuẩn OFFSET ... FETCH NEXT ... cả hai bên đều hỗ trợ.
- *
- * INSERT động theo object runtime (insert/insertRaw) dùng builder private
- * buildInsert/buildRawInsert — tên cột lấy từ ACTIVITY_COLUMNS (whitelist,
- * không nhận tên cột tùy ý từ input). Sau khi ghi, REFETCH bằng câu SELECT
- * theo id khai báo inline ngay trong method để trả shape camelCase đầy đủ
- * (row OUTPUT có key snake_case).
- *
- * DB_MODE=memory thì module.exports swap sang cắt lát của memory
- * repository (xem cuối file).
- */
+/** SQL cho nhật ký hoạt động và kiểm toán. */
 
 const db = require('../../config/db');
 const { TABLES } = require('../../config/tables');
+const pagination = require('../../util/pagination');
 
 // ============== PRIVATE: HỖ TRỢ DIALECT + GUARD THAM SỐ ==============
 
@@ -74,160 +47,22 @@ function guardParams(params) {
   }
 }
 
-// ==================== PRIVATE: BUILDER INSERT ĐỘNG ====================
-
-/** map camelCase (domain) -> tên cột DB của whs_activity. */
-const ACTIVITY_COLUMNS = {
-  id: 'id',
-  actedAt: 'acted_at',
-  userId: 'emp_no',
-  // 2026-10-19: DB thật vẫn còn cột user_name NOT NULL — phải ghi lại
-  // (shared.logActivity truyền userName = tên nv, fallback = mã nv).
-  // Read side (list/insert refetch) KHÔNG select cột này -> response shape
-  // không đổi.
-  userName: 'user_name',
-  actionKey: 'action_key',
-  allocationId: 'allocation_id',
-  noticeDetailId: 'notice_detail_id',
-  // po_id (INT, logical -> pur_order2.id): activity Assign Shelf xảy ra
-  // TRƯỚC khi có notice nên phải lưu po_id (yêu cầu user 2026-10-17).
-  poId: 'po_id',
-  poNumber: 'po_number',
-  slotCode: 'slot_code',
-  qty: 'qty',
-  unit: 'unit',
-  detail: 'detail',
-};
-
-// Các field kiểu JSON — ghi xuống DB dưới dạng chuỗi JSON.stringify
-// (nếu có trong columnMap), đọc lên service tự parse lại.
-const JSON_FIELDS = ['iqcHistory'];
-
-/**
- * Dựng câu INSERT động từ domain object camelCase qua columnMap (cột thay
- * đổi theo object runtime nên không thể viết tĩnh). Chỉ nhận cột có trong
- * columnMap (whitelist). Vị trí mệnh đề lấy về dòng vừa ghi khác nhau
- * theo dialect: SQL Server đặt OUTPUT inserted.* TRƯỚC VALUES; PG bắt
- * RETURNING ở CUỐI câu — sai vị trí là PG từ chối cú pháp.
- * @param {string} table tên bảng thật (đã qua TABLES)
- * @param {Record<string, unknown>} obj domain object camelCase
- * @param {Record<string, string>} columnMap map camelCase -> tên cột DB
- * @returns {{ text: string, values: unknown[] } | null} null nếu không có cột hợp lệ
- */
-function buildInsert(table, obj, columnMap) {
-  const keys = Object.keys(obj).filter((key) => columnMap[key] !== undefined);
-  if (keys.length === 0) return null;
-
-  const cols = keys.map((key) => columnMap[key]);
-  const values = keys.map((key) => {
-    if (JSON_FIELDS.includes(key)) {
-      return obj[key] === null || obj[key] === undefined ? null : JSON.stringify(obj[key]);
-    }
-    return obj[key] === undefined ? null : obj[key];
-  });
-  const placeholders = keys.map(() => '?').join(', ');
-
-  const text = isPg()
-    ? `INSERT INTO ${table} (${cols.join(', ')}) VALUES (${placeholders}) RETURNING *`
-    : `INSERT INTO ${table} (${cols.join(', ')}) OUTPUT inserted.* VALUES (${placeholders})`;
-
-  return { text, values };
-}
-
-/**
- * Dựng câu INSERT trực tiếp từ row có key = TÊN CỘT DB (snake_case) —
- * dùng cho seed (key trùng tên cột).
- * @param {string} table tên bảng thật
- * @param {Record<string, unknown>} row row key = tên cột DB
- * @returns {{ text: string, values: unknown[] } | null} null nếu row rỗng
- */
-function buildRawInsert(table, row) {
-  const keys = Object.keys(row);
-  if (keys.length === 0) return null;
-
-  const cols = keys.join(', ');
-  const placeholders = keys.map(() => '?').join(', ');
-  const text = isPg()
-    ? `INSERT INTO ${table} (${cols}) VALUES (${placeholders}) RETURNING *`
-    : `INSERT INTO ${table} (${cols}) OUTPUT inserted.* VALUES (${placeholders})`;
-
-  return { text, values: keys.map((key) => row[key]) };
-}
-
-// ==================== CLASS REPOSITORY ====================
-
 class ActivityModel {
-  /**
-   * Nhật ký gần nhất (sắp theo acted_at giảm dần, giới hạn `limit` dòng —
-   * SQL trả tất cả, JS slice như cũ).
-   * @param {number} [limit=50] số dòng giữ lại (<= 0 trả tất cả)
-   * @returns {Promise<Record<string, unknown>[]>}
-   */
-  async list(limit = 50) {
-    const sql = `
-    -- DECLARE khong can tham so.
-    SELECT
-      a.id AS [id],
-      a.acted_at AS [time],
-      a.emp_no AS [userId],
-      a.action_key AS [actionKey],
-      a.allocation_id AS [allocationId],
-      a.notice_detail_id AS [noticeDetailId],
-      a.po_id AS [poId],
-      a.po_number AS [poNumber],
-      a.slot_code AS [slotCode],
-      CAST(a.qty AS FLOAT) AS [qty],
-      a.unit AS [unit],
-      a.detail AS [detail],
-      'mock' AS [source]
-    FROM whs_activity a
-    WHERE a.action_key NOT IN (${ACCOUNT_AUDIT_ACTIONS.map(() => '?').join(', ')})
-    ORDER BY a.acted_at DESC
-  `;
-    const params = ACCOUNT_AUDIT_ACTIONS;
-    guardParams(params);
-    const { rows } = await db.query(toDialect(sql), params);
-    return limit > 0 ? rows.slice(0, limit) : rows;
-  }
-
-  /**
-   * Ghi 1 dòng nhật ký từ domain object camelCase (ĐỘNG — buildInsert):
-   * id, actedAt, userId, actionKey, allocationId, noticeDetailId, poId,
-   * poNumber, slotCode, qty, unit, detail. actedAt mặc định = now.
-   * Refetch theo id (PK VARCHAR(40)) để trả shape camelCase đầy đủ.
-   * @param {Record<string, unknown>} activity domain object camelCase
-   * @returns {Promise<Record<string, unknown> | null>}
-   */
+  // Ghi nhật ký thay đổi kệ, lô và tài khoản.
   async insert(activity, query = db.query) {
-    const row = { ...activity };
-    if (!row.actedAt) row.actedAt = new Date().toISOString();
-    const insert = buildInsert(TABLES.activity, row, ACTIVITY_COLUMNS);
-    if (!insert) return null;
-    const { rows } = await query(insert.text, insert.values);
-    if (!rows[0]) return null;
     const sql = `
-    -- DECLARE @id VARCHAR(40) = 'act-0001';
-    SELECT
-      a.id AS [id],
-      a.acted_at AS [time],
-      a.emp_no AS [userId],
-      a.action_key AS [actionKey],
-      a.allocation_id AS [allocationId],
-      a.notice_detail_id AS [noticeDetailId],
-      a.po_id AS [poId],
-      a.po_number AS [poNumber],
-      a.slot_code AS [slotCode],
-      CAST(a.qty AS FLOAT) AS [qty],
-      a.unit AS [unit],
-      a.detail AS [detail],
-      'mock' AS [source]
-    FROM whs_activity a
-    WHERE a.id = ?
-  `;
-    const params = [rows[0].id];
-    guardParams(params);
-    const { rows: refetched } = await query(toDialect(sql), params);
-    return refetched[0] || null;
+      INSERT INTO ${TABLES.activity} (
+        id, acted_at, emp_no, user_name, action_key, allocation_id,
+        notice_detail_id, po_id, po_number, slot_code, qty, unit, detail
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `;
+    await query(toDialect(sql), [
+      activity.id, activity.actedAt, activity.userId, activity.userName,
+      activity.actionKey, activity.allocationId, activity.noticeDetailId,
+      activity.poId, activity.poNumber, activity.slotCode, activity.qty,
+      activity.unit, activity.detail,
+    ].map((value) => value ?? null));
   }
 
   /**
@@ -269,44 +104,7 @@ class ActivityModel {
     const { rows } = await query(toDialect(sql), params);
     return rows[0] || null;
   }
-  /**
-   * Ghi 1 dòng nhật ký từ row có key = tên cột DB (snake_case) — dùng
-   * cho seed. Tham số `query` tùy chọn: reset truyền txQuery để chạy
-   * trong cùng transaction (refetch cũng chạy trên tx đó).
-   * @param {Record<string, unknown>} row row key = tên cột DB
-   * @param {Function} [query] bộ query (mặc định db.query)
-   * @returns {Promise<Record<string, unknown> | null>}
-   */
-  async insertRaw(row, query = db.query) {
-    const raw = { ...row };
-    if (!raw.acted_at) raw.acted_at = new Date().toISOString();
-    const insert = buildRawInsert(TABLES.activity, raw);
-    const { rows } = await query(insert.text, insert.values);
-    if (!rows[0]) return null;
-    const sql = `
-    -- DECLARE @id VARCHAR(40) = 'act-0001';
-    SELECT
-      a.id AS [id],
-      a.acted_at AS [time],
-      a.emp_no AS [userId],
-      a.action_key AS [actionKey],
-      a.allocation_id AS [allocationId],
-      a.notice_detail_id AS [noticeDetailId],
-      a.po_id AS [poId],
-      a.po_number AS [poNumber],
-      a.slot_code AS [slotCode],
-      CAST(a.qty AS FLOAT) AS [qty],
-      a.unit AS [unit],
-      a.detail AS [detail],
-      'mock' AS [source]
-    FROM whs_activity a
-    WHERE a.id = ?
-  `;
-    const params = [rows[0].id];
-    guardParams(params);
-    const { rows: refetched } = await query(toDialect(sql), params);
-    return refetched[0] || null;
-  }
+
 
   /** Xóa toàn bộ activity (chỉ dùng trong reset seed). */
   async deleteAll(query = db.query) {
@@ -337,15 +135,10 @@ class ActivityModel {
     const kw = String(opts.keyword || '').trim();
     const keywordPattern = kw ? `%${kw}%` : null;
     const actionKey = String(opts.actionKey || '').trim() || null;
-    const offset = (opts.page - 1) * opts.pageSize;
     const actionKeys = opts.actionKeys ?? ACCOUNT_AUDIT_ACTIONS;
     const actionFilter = `AND a.action_key ${opts.actionKeys ? 'IN' : 'NOT IN'}
       (${actionKeys.map(() => '?').join(', ')})`;
     const sql = `
-    -- DECLARE @keywordPattern NVARCHAR(100) = NULL;
-    -- DECLARE @actionKey NVARCHAR(40) = NULL;
-    -- DECLARE @offset INT = 0;
-    -- DECLARE @pageSize INT = 20;
     SELECT
       a.id AS [id],
       a.acted_at AS [time],
@@ -375,71 +168,17 @@ class ActivityModel {
       OR a.action_key = ?
     )
     ${actionFilter}
-    ORDER BY a.acted_at DESC, a.id DESC
-    OFFSET ? ROWS FETCH NEXT ? ROWS ONLY
-  `;
-    const params = [
-      keywordPattern,
-      keywordPattern,
-      keywordPattern,
-      keywordPattern,
-      keywordPattern,
-      keywordPattern,
-      keywordPattern,
-      actionKey,
-      actionKey,
-      ...actionKeys,
-      offset,
-      opts.pageSize,
-    ];
-    guardParams(params);
-    const { rows } = await db.query(toDialect(sql), params);
-    const countSql = `
-    -- DECLARE @keywordPattern NVARCHAR(100) = NULL;
-    -- DECLARE @actionKey NVARCHAR(40) = NULL;
-    SELECT COUNT(*) AS [total]
-    FROM whs_activity a
-    WHERE (
-      CAST(? AS NVARCHAR(100)) IS NULL
-      OR a.po_number LIKE ?
-      OR a.user_name LIKE ?
-      OR a.emp_no LIKE ?
-      OR a.slot_code LIKE ?
-      OR a.detail LIKE ?
-      OR a.action_key LIKE ?
-    )
-    AND (
-      CAST(? AS NVARCHAR(40)) IS NULL
-      OR a.action_key = ?
-    )
-    ${actionFilter}
-  `;
-    const countParams = [
-      keywordPattern,
-      keywordPattern,
-      keywordPattern,
-      keywordPattern,
-      keywordPattern,
-      keywordPattern,
-      keywordPattern,
-      actionKey,
-      actionKey,
-      ...actionKeys,
-    ];
-    guardParams(countParams);
-    const counted = await db.query(toDialect(countSql), countParams);
-    return {
-      rows, // SQL đã alias đầy đủ camelCase
-      total: Number(counted.rows[0] ? counted.rows[0].total : 0),
-    };
+    `;
+    const result = await pagination({
+      query: toDialect(sql),
+      params: [keywordPattern, keywordPattern, keywordPattern, keywordPattern, keywordPattern, keywordPattern, keywordPattern, actionKey, actionKey, ...actionKeys],
+      orderBy: toDialect('[time] DESC, [id] DESC'),
+      page: opts.page,
+      pageSize: opts.pageSize,
+    });
+    return { rows: result.data, total: result.pagination.totalItems };
   }
 }
 
-const { getMemoryRepository } = require('../../shared/memory.repository');
-
-if (db.getMode() === 'memory') {
-  module.exports = getMemoryRepository().activity;
-} else {
-  module.exports = new ActivityModel();
-  module.exports.ActivityModel = ActivityModel; // for reset.repository tx use
-}
+module.exports = new ActivityModel();
+module.exports.ActivityModel = ActivityModel;

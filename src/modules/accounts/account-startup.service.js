@@ -1,6 +1,5 @@
 'use strict';
 
-const { getMode } = require('../../config/db');
 const { TEST_ACCOUNTS } = require('../../config/test-accounts');
 
 let startupPromise = null;
@@ -15,23 +14,24 @@ async function ensureTestAccounts() {
   for (const acc of TEST_ACCOUNTS) {
     const existing = await AccountsRepository.byId(acc.emp_no);
     if (!existing) {
-      const { emp_name, email, ...roleRow } = acc;
-      void emp_name;
-      void email;
-      await AccountsRepository.insertRaw(roleRow);
+      await AccountsRepository.insert({
+        employeeCode: acc.emp_no,
+        role: acc.role,
+        locked: acc.locked,
+        password: acc.password,
+        active: acc.active,
+      });
     }
   }
 }
 
 /**
  * Khởi động repository (gọi 1 lần khi boot server):
- * - memory: không làm gì (memory.repository tự nạp dữ liệu seed riêng).
  * - sqlserver / test-postgres: chèn tài khoản test raw. Chạy nền không chặn
  *   listen; lỗi chỉ log và cho phép thử lại ở lần gọi sau (startupPromise
  *   được reset về null để lần gọi kế tiếp khởi động lại).
  */
 function ensureStartup() {
-  if (getMode() === 'memory') return Promise.resolve();
   if (!startupPromise) {
     startupPromise = ensureTestAccounts().catch((error) => {
       startupPromise = null; // reset để lần gọi sau có thể thử lại

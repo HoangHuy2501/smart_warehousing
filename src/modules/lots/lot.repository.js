@@ -58,11 +58,11 @@
  *     decreaseAllocationQty).
  *   - closed_at KHÔNG đồng nghĩa RETURNED — chỉ là đã rời kệ.
  *
- * DB_MODE=memory thì module.exports swap sang cắt lát của memory
  * repository (xem cuối file).
  */
 
 const db = require('../../config/db');
+const pagination = require('../../util/pagination');
 const { TABLES } = require('../../config/tables');
 
 // ==================== PRIVATE: HỖ TRỢ DIALECT + THỰC THI ====================
@@ -296,22 +296,10 @@ class LotModel {
     return rows;
   }
 
-  /**
-   * Phân trang lô (GET /lots?page=&pageSize=) — 2 câu SQL inline chạy
-   * song song (Promise.all): câu SELECT phân trang + câu COUNT toàn bảng.
-   * Thứ tự giống listLots của service (assignedAt DESC, id DESC) — trang
-   * nào cũng ra cùng thứ tự nên không lặp/thiếu dòng khi chuyển trang.
-   * COUNT đếm trực tiếp bảng allocation (JOIN 1-1, không fan-out).
-   * @param {number} page trang 1-indexed
-   * @param {number} pageSize số dòng mỗi trang
-   * @returns {Promise<{ rows: Record<string, unknown>[], total: number }>}
-   */
+  // Danh sách và tổng số dòng dùng cùng bộ lọc.
   async listPaged(page, pageSize) {
-    const offset = (page - 1) * pageSize;
 
     const sql = `
-    -- DECLARE @offset INT = 0;
-    -- DECLARE @pageSize INT = 20;
     SELECT
       a.id AS [id],
       COALESCE(o1.sheet_no, o2.sheet_no) AS [poNumber],
@@ -370,27 +358,14 @@ class LotModel {
       GROUP BY i2.pur_no, i2.pur_id, i2.goods_no
     ) grn ON grn.pur_no = o1.sheet_no AND grn.pur_id = o2.sheet_id
      AND grn.goods_no = a.goods_no
-    ORDER BY a.allocated_at DESC, a.id DESC
-    OFFSET ? ROWS FETCH NEXT ? ROWS ONLY;
-  `;
-    const params = [offset, pageSize];
-
-    const sqlCount = `
-    -- DECLARE khong can tham so.
-    SELECT COUNT(*) AS [total] FROM whs_slot_allocation;
-  `;
-    const countParams = [];
-
-    guardParams(params);
-    guardParams(countParams);
-    const [list, counted] = await Promise.all([
-      db.query(toDialect(sql), params),
-      db.query(toDialect(sqlCount), countParams),
-    ]);
-    return {
-      rows: list.rows,
-      total: Number(counted.rows[0] ? counted.rows[0].total : 0),
-    };
+    `;
+    const result = await pagination({
+      query: toDialect(sql),
+      orderBy: toDialect('[assignedAt] DESC, [id] DESC'),
+      page,
+      pageSize,
+    });
+    return { rows: result.data, total: result.pagination.totalItems };
   }
 
   /**
@@ -1405,11 +1380,5 @@ class LotModel {
   }
 }
 
-const { getMemoryRepository } = require('../../shared/memory.repository');
-
-if (db.getMode() === 'memory') {
-  module.exports = getMemoryRepository().lots;
-} else {
-  module.exports = new LotModel();
-  module.exports.LotModel = LotModel; // for reset.repository tx use
-}
+module.exports = new LotModel();
+module.exports.LotModel = LotModel;

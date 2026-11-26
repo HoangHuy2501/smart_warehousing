@@ -39,7 +39,6 @@
  * Truy cập T8 production READ ONLY. Chỉ write whs_* (ghi thật nằm ở
  * receipt.repository / lot.repository, được service gọi).
  *
- * DB_MODE=memory thì module.exports swap sang cắt lát của memory
  * repository (xem cuối file).
  */
 
@@ -615,11 +614,5 @@ class ReceiptSyncRepository {
     }
 }
 
-const { getMemoryRepository } = require('../../shared/memory.repository');
-
-if (db.getMode() === 'memory') {
-    module.exports = getMemoryRepository().receiptSync;
-} else {
-    module.exports = new ReceiptSyncRepository();
-    module.exports.ReceiptSyncRepository = ReceiptSyncRepository;
-}
+module.exports = new ReceiptSyncRepository();
+module.exports.ReceiptSyncRepository = ReceiptSyncRepository;

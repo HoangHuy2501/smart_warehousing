@@ -131,20 +131,49 @@ async function reserveSheetNumber(query) {
     return rows[0]?.sheet_no;
 }
 
-async function insertRow(table, logicalName, values, employeeNo, query) {
-    const fields = Object.keys(values);
-    await query(`
-        INSERT INTO ${table} (${fields.join(', ')})
-        VALUES (${fields.map(() => '?').join(', ')})
-    `, Object.values(values));
-    await operationLog.insert({
-        employeeNo, tableName: logicalName, operation: 'insert',
-        description: audit.insert(logicalName, values),
+// Ghi audit T8 cùng transaction với phiếu nhập.
+function logInsert(tableName, values, employeeNo, query) {
+    return operationLog.insert({
+        employeeNo, tableName, operation: 'insert',
+        description: audit.insert(tableName, values),
     }, query);
 }
 
+// POST /lots/:id/t8-receipt — tạo đầu phiếu nháp.
+async function insertHeader(values, employeeNo, query) {
+    await query(`
+        INSERT INTO ${t.in1} (
+            sheet_type, sheet_no, sheet_date, su_no, emp_no,
+            create_user, rem, sheet_sta, check_sta
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `, [
+        values.sheet_type, values.sheet_no, values.sheet_date, values.su_no, values.emp_no,
+        values.create_user, values.rem, values.sheet_sta, values.check_sta,
+    ]);
+    await logInsert('pur_in1', values, employeeNo, query);
+}
+
+// POST /lots/:id/t8-receipt — thêm dòng vào phiếu nháp.
+async function insertLine(values, employeeNo, query) {
+    await query(`
+        INSERT INTO ${t.in2} (
+            sheet_no, sheet_id, notice_no, notice_id, pur_no, pur_id, goods_no,
+            unit_no, unit_rate, st_no, st_bit_no, made_lot, sheet_qty, sheet_pri,
+            pri_dis, tax_sw, cur_no, inv_type, rem, def06, def14, def15, sheet_sta
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `, [
+        values.sheet_no, values.sheet_id, values.notice_no, values.notice_id,
+        values.pur_no, values.pur_id, values.goods_no, values.unit_no, values.unit_rate,
+        values.st_no, values.st_bit_no, values.made_lot, values.sheet_qty, values.sheet_pri,
+        values.pri_dis, values.tax_sw, values.cur_no, values.inv_type, values.rem,
+        values.def06, values.def14, values.def15, values.sheet_sta,
+    ]);
+    await logInsert('pur_in2', values, employeeNo, query);
+}
+
 module.exports = {
-    findWaitingPeers, findSource, findCreator, findActiveSlotCode, reserveSheetNumber, findOpenDraft, nextLineId,
-    insertHeader: (values, empNo, query) => insertRow(t.in1, 'pur_in1', values, empNo, query),
-    insertLine: (values, empNo, query) => insertRow(t.in2, 'pur_in2', values, empNo, query),
+    findWaitingPeers, findSource, findCreator, findActiveSlotCode, reserveSheetNumber,
+    findOpenDraft, nextLineId, insertHeader, insertLine,
 };

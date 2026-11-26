@@ -108,36 +108,6 @@ function toApiLot(lot) {
   };
 }
 
-/**
- * PO (mapPoRow của po.repository) → IIncomingPo cho FE.
- * assignedQty = tổng số lượng đã gán kệ (allocation active) — FE dùng
- * tính số dư trực tiếp (GET /pos và bootstrap).
- * @param {object} po - Dòng PO đã map camelCase
- * @returns {object} Shape IIncomingPo
- */
-function toApiPo(po) {
-  return {
-    id: po.id,
-    poNumber: po.poNumber,
-    poLine: po.poLine,
-    itemCode: po.itemCode,
-    material: po.material,
-    supplier: po.supplier,
-    qty: po.qty,
-    /** Số lượng gốc của dòng PO (tham khảo — KHÔNG phải maximum) */
-    sheetQty: opt(po.sheetQty),
-    unit: po.unit,
-    unitPrice: po.unitPrice,
-    confirmed: opt(po.confirmed),
-    eta: po.eta,
-    arrived: po.arrived,
-    grnRef: opt(po.grnRef),
-    lotNo: opt(po.lotNo),
-    assignedQty: opt(po.assignedQty),
-    source: 'mock',
-  };
-}
-
 /** Activity (mapActivityRow) → IActivity cho FE. */
 function toApiActivity(entry) {
   return {
@@ -158,6 +128,5 @@ module.exports = {
   toApiAccount,
   toApiSlot,
   toApiLot,
-  toApiPo,
   toApiActivity,
 };

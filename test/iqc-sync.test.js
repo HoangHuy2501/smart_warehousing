@@ -1055,8 +1055,7 @@ async function runCases() {
         manualIqcDisabled('sqlserver') === true
     );
     check(
-        'R: manual IQC còn mở cho simulator (memory / test-postgres)',
-        manualIqcDisabled('memory') === false &&
+        'R: manual IQC còn mở cho PostgreSQL test',
         manualIqcDisabled('test-postgres') === false
     );
 

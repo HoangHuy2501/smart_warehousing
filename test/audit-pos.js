@@ -7,8 +7,6 @@
 process.env.DB_MODE = 'test-postgres';
 process.env.DB_TABLE_PREFIX = 'whs3_';
 
-const { buildSeed } = require('../src/config/seed-data');
-
 async function main() {
   const db = require('../src/config/db');
   // 1) Kiem tra seed con du lieu (khong reset — doc thu du lieu hien tai)

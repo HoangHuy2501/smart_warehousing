@@ -482,25 +482,6 @@ function buildSwaggerSpec() {
           },
         },
       },
-      '/api/warehouse': {
-        get: {
-          tags: ['Bootstrap'],
-          summary:
-            'Bootstrap (legacy): lay toan bo du lieu trong 1 call',
-          description:
-            'FE da chuyen sang 5 GET domain rieng (/accounts, /slots, ' +
-            '/lots, /incoming-pos, /activity). Endpoint nay giu lai de ' +
-            'tuong thich — khong xoa.',
-          responses: {
-            200: {
-              description: 'Danh sach accounts, slots, lots, incomingPos, activity',
-              content: {
-                'application/json': { schema: { $ref: '#/components/schemas/Bootstrap' } },
-              },
-            },
-          },
-        },
-      },
       '/api/warehouse/lots': {
         get: {
           tags: ['Lots'],
@@ -688,7 +669,7 @@ function buildSwaggerSpec() {
           summary:
             'T8 SIMULATOR ONLY — nhan ket qua IQC cho lo hang (gia lap T8 day ket qua)',
           description:
-            'SIMULATOR ONLY (DB_MODE=memory / test): tren DB_MODE=sqlserver that endpoint tra loi 403 iqc_manual_disabled va KHONG cap nhat whs_slot_allocation / whs_allocation_receipt / T8 — production chi chay IQC Auto Sync Worker. ' +
+            'SIMULATOR ONLY (DB_MODE=test-postgres): tren DB_MODE=sqlserver that endpoint tra loi 403 iqc_manual_disabled va KHONG cap nhat whs_slot_allocation / whs_allocation_receipt / T8 — production chi chay IQC Auto Sync Worker. ' +
             'Neu allocation chua match notice (PO_ASSIGNED): he thong tu tao t8_pur_notice1 + t8_pur_notice2 (T8 simulator) roi confirm allocation (TEMP_IN) truoc khi ap IQC. ' +
             'State machine (SIMULATOR — KHONG phai business production): PASS/EXEMPT -> IN_STOCK + warehouse IN; FAIL_PENDING -> giu WAITING_IQC + has_warning; RETURN -> RETURNED + warehouse RETURN. Production: IQC Auto Sync Worker (adj_result/pro_result) tao WAITING_STOCK / RETURNED / FAIL_ACCEPT / FAIL_RETURN.',
           parameters: [

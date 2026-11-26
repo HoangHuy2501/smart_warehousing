@@ -34,7 +34,6 @@
  * cho sandbox test (bracket alias, NVARCHAR, tiền tố bảng). Tham số luôn
  * bind qua placeholder `?` — không nối chuỗi giá trị.
  *
- * DB_MODE=memory thì module.exports swap sang cắt lát iqcSync của memory
  * repository (xem cuối file).
  */
 
@@ -409,11 +408,5 @@ class IqcSyncRepository {
     }
 }
 
-const { getMemoryRepository } = require('../../shared/memory.repository');
-
-if (db.getMode() === 'memory') {
-    module.exports = getMemoryRepository().iqcSync;
-} else {
-    module.exports = new IqcSyncRepository();
-    module.exports.IqcSyncRepository = IqcSyncRepository;
-}
+module.exports = new IqcSyncRepository();
+module.exports.IqcSyncRepository = IqcSyncRepository;

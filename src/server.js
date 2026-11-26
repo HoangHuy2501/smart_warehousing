@@ -15,16 +15,11 @@ const { ensureStartup } = require('./modules/accounts/account-startup.service');
 
 /**
  * Ping DB ngay khi server len de biet ket noi thanh cong hay chua.
- * - memory: chi log la dang chay in-memory (khong can DB).
  * - sqlserver / test-postgres: chay SELECT 1, log kem mode + dialect + thoi gian.
  * Khong chặn listen; that bai chi log loi (server van len de nhin that tu log).
  */
 async function logDbConnectionStatus() {
   const mode = db.getMode();
-  if (mode === 'memory') {
-    console.log('[db] DB_MODE=memory — chạy dữ liệu in-memory, không cần kết nối DB');
-    return;
-  }
   const startedAt = Date.now();
   try {
     await db.query('SELECT 1 AS ping');

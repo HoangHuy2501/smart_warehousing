@@ -2,7 +2,6 @@
 
 require('dotenv').config({ path: require('path').join(__dirname, '..', '..', '..', '.env') });
 
-const db = require('../../config/db');
 const workerConfig = require('../../config/worker.config');
 const { createAppWorker } = require('../../util/worker/create-app-worker');
 const { getWorkerQueue, closeQueues } = require('../../util/worker/queue');
@@ -29,7 +28,7 @@ async function main() {
     const date = process.env.OUTBOUND_SYNC_START_DATE;
     const since = new Date(`${date}T00:00:00.000Z`);
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !Number.isFinite(+since) ||
-        since.toISOString().slice(0, 10) !== date || db.getMode() === 'memory') {
+        since.toISOString().slice(0, 10) !== date) {
         throw new Error('Outbound sync requires a SQL database and a valid YYYY-MM-DD start date');
     }
     const production = process.env.NODE_ENV === 'production';

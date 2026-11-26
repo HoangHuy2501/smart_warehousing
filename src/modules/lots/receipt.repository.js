@@ -49,7 +49,6 @@
  * trong chính method để trả shape camelCase đầy đủ (row OUTPUT có key
  * snake_case).
  *
- * DB_MODE=memory thì module.exports swap sang cắt lát của memory
  * repository (xem cuối file).
  */
 
@@ -494,11 +493,5 @@ class ReceiptModel {
   }
 }
 
-const { getMemoryRepository } = require('../../shared/memory.repository');
-
-if (db.getMode() === 'memory') {
-  module.exports = getMemoryRepository().receipts;
-} else {
-  module.exports = new ReceiptModel();
-  module.exports.ReceiptModel = ReceiptModel; // for reset.repository tx use
-}
+module.exports = new ReceiptModel();
+module.exports.ReceiptModel = ReceiptModel;
