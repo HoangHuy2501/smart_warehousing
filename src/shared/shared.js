@@ -140,7 +140,7 @@ class SharedService {
 const shared = new SharedService();
 
 /**
- * Parse query phân trang cho GET /accounts, /slots, /lots, /incoming-pos.
+ * Parse query phân trang cho GET /accounts, /slots, /lots.
  * Không truyền page/pageSize → null (gọi list full như cũ).
  * Truyền bất kỳ → { page (>=1, mặc định 1), pageSize (1..200, mặc định 100) }.
  * @param {object} query - Query params của request

@@ -46,10 +46,7 @@ Returns `IShelfSlot[]` (every slot, one row each, with keeper/status).
 ### GET `/lots` — lot list (split from bootstrap, paged)
 Returns `ILotV2[]` (one row per allocation, same order as bootstrap: `assignedAt` desc). SQL paging order: `ORDER BY a.allocated_at DESC, a.id DESC`.
 
-### GET `/incoming-pos` — incoming POs (split from bootstrap, paged)
-Returns `IIncomingPo[]` (open + history POs, sorted by id numeric). SQL paging order: `ORDER BY o1.close_sw, o2.del_date, o2.id`.
-
-#### Pagination for `/accounts`, `/slots`, `/lots`, `/incoming-pos` (added 2026-10-17)
+#### Pagination for `/accounts`, `/slots`, `/lots` (added 2026-10-17)
 
 | param | type | default | notes |
 |---|---|---|---|

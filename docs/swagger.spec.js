@@ -180,7 +180,7 @@ const ME_RESPONSE_SCHEMA = {
 };
 
 /** GET /pos — response phan trang PO mo + bucket counts. */
-// Query phan trang dung chung cho GET /accounts, /slots, /lots, /incoming-pos.
+// Query phan trang dung chung cho GET /accounts, /slots, /lots.
 // Khong truyen -> mang full (backward compat); truen bat ky -> IPaged.
 const PAGE_PARAMS = [
   {
@@ -535,36 +535,6 @@ function buildSwaggerSpec() {
               content: {
                 'application/json': {
                   schema: { type: 'array', items: { type: 'object' } },
-                },
-              },
-            },
-          },
-        },
-      },
-      '/api/warehouse/incoming-pos': {
-        get: {
-          tags: ['Pos'],
-          summary: 'PO den hang (tach bootstrap, ho tro phan trang)',
-          description:
-            'Danh sách dòng PO mở, không lọc theo thời điểm tạm nhập. ' +
-            'Không truyền page/pageSize trả mảng đầy đủ theo ID số. ' +
-            'Có phân trang trả items, total, page, pageSize. Backend đếm tổng riêng ' +
-            'và lấy trang theo ngày dự kiến giao, rồi theo ID dạng chuỗi.',
-          parameters: PAGE_PARAMS,
-          responses: {
-            200: {
-              description: 'IIncomingPo[] hoac IPaged<IIncomingPo>',
-              content: {
-                'application/json': {
-                  schema: {
-                    oneOf: [
-                      {
-                        type: 'array',
-                        items: { $ref: '#/components/schemas/Po' },
-                      },
-                      PAGED_SCHEMA('#/components/schemas/Po'),
-                    ],
-                  },
                 },
               },
             },

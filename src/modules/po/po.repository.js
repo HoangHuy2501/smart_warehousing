@@ -33,68 +33,7 @@ function searchParams(opts) {
   };
 }
 
-// Dùng cùng điều kiện cho COUNT, danh sách phân trang và danh sách đầy đủ.
-// GET /api/warehouse/incoming-pos — dòng PO còn mở.
-const INCOMING_PO_SELECT = `
-    SELECT
-      CAST(o2.id AS VARCHAR(20)) AS [id],
-      o1.sheet_no AS [poNumber],
-      CAST(o2.id AS VARCHAR(20)) AS [poLine],
-      o2.goods_no AS [itemCode],
-      g.goods_name AS [material],
-      o1.su_name11 AS [supplier],
-      CAST(o2.sheet_qty AS FLOAT) AS [qty],
-      o2.unit_no AS [unit],
-      CAST(o2.sheet_pri AS FLOAT) AS [unitPrice],
-      CAST(CASE WHEN o1.check_sta = 'Y' THEN 1 ELSE 0 END AS BIT) AS [confirmed],
-      o2.del_date AS [eta],
-      CAST(CASE WHEN EXISTS (
-        SELECT 1 FROM pur_in2 i
-        WHERE i.pur_no = o1.sheet_no AND i.pur_id = o2.sheet_id
-          AND i.goods_no = o2.goods_no
-      ) THEN 1 ELSE 0 END AS BIT) AS [arrived],
-      (SELECT MAX(i.sheet_no) FROM pur_in2 i
-       WHERE i.pur_no = o1.sheet_no AND i.pur_id = o2.sheet_id
-         AND i.goods_no = o2.goods_no) AS [grnRef],
-      CAST(NULL AS VARCHAR(40)) AS [lotNo],
-      CAST(COALESCE((
-        SELECT SUM(a.allocated_qty) FROM whs_slot_allocation a WHERE a.po_id = o2.id
-      ), 0) AS FLOAT) AS [assignedQty]
-    FROM pur_order2 o2
-    JOIN pur_order1 o1 ON o1.sheet_no = o2.sheet_no
-    JOIN sys_userpass u ON u.user_no = o1.create_user AND u.user_name <> 'ADM'
-    LEFT JOIN bas_goods g ON g.goods_no = o2.goods_no
-    WHERE o1.close_sw IN ('N', '0')
-      AND o1.sheet_sta <> '0'
-      AND (
-        o2.goods_no LIKE 'M1%' OR o2.goods_no LIKE 'M2%'
-        OR o2.goods_no LIKE 'M3%' OR o2.goods_no LIKE 'M4%'
-        OR o2.goods_no LIKE 'M5%' OR o2.goods_no LIKE 'M6%'
-        OR o2.goods_no LIKE 'A2%'
-      )
-`;
-
 class PoModel {
-  // GET /api/warehouse/incoming-pos (không phân trang).
-  async list() {
-    const { rows } = await db.query(`
-      ${INCOMING_PO_SELECT}
-      ORDER BY o1.close_sw, o2.del_date, o2.id;
-    `);
-    return rows;
-  }
-
-  // GET /api/warehouse/incoming-pos — trang và tổng số dòng.
-  async listPaged(page, pageSize) {
-    const result = await pagination({
-      query: INCOMING_PO_SELECT,
-      orderBy: '[eta], [id]',
-      page,
-      pageSize,
-    });
-    return { rows: result.data, total: result.pagination.totalItems };
-  }
-
   /**
    * Tìm dòng PO theo po_id (= pur_order2.id).
    * @param {number|string} poId po_id = pur_order2.id

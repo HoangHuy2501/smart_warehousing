@@ -83,9 +83,6 @@ async function api(method, path, { token, body } = {}) {
     posKw.status === 200 && posKw.json && Array.isArray(posKw.json.items),
     { status: posKw.status, body: posKw.json }
   );
-  const incoming = await api('GET', '/api/warehouse/incoming-pos', { token: T });
-  check('GET /incoming-pos 200', incoming.status === 200, { status: incoming.status });
-
   // ---------- LOT ----------
   const lots = await api('GET', '/api/warehouse/lots?page=1&pageSize=3', { token: T });
   check(
