@@ -28,10 +28,10 @@ test('PO ETA totals use the same filters as the list without page limits', async
     const list = calls.find(({ sql }) => sql.includes('OFFSET'));
     assert.equal(calls.length, 2);
     assert.doesNotMatch(count.sql, /OFFSET|CREATE TABLE|INTO #/);
-    assert.match(count.sql, /'overdue' AND \(o2.del_date IS NULL OR o2.del_date < \?\)/);
+    assert.match(count.sql, /'overdue' AND \(o.del_date IS NULL OR o.del_date < \?\)/);
     assert.match(list.sql, /END AS \[status_po\]/);
     assert.match(list.sql, /JOIN pur_in1 i1 ON i1.sheet_no = i.sheet_no/);
-    assert.match(list.sql, /n\.id = u\.lot_sort/);
+    assert.match(list.sql, /n\.pur_id = o\.sheet_id/);
     for (const statement of [count.sql, list.sql]) {
         assert.doesNotMatch(statement, /DATEADD\(HOUR|latest_create|FROM candidate_receipt pi\s+WHERE pi\.pur_no = x\.pur_no/);
     }
