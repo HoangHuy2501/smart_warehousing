@@ -35,7 +35,7 @@
 
 'use strict';
 
-const { toApiPo, toApiActivity } = require('../../shared/mappers');
+const { toApiActivity } = require('../../shared/mappers');
 const { computeBucketDates } = require('../../util/bucket-dates');
 // @type cho từng require: module.exports repository bị swap theo DB_MODE
 // (memory slice / new XxxModel()) nên editor không tự suy ra kiểu — gắn
@@ -98,25 +98,11 @@ class SearchServices {
       page,
       pageSize,
     };
-    if (!wantCounts) {
-      const { rows, total, poTotal } = await PoRepository.searchPurchases(base);
-      return { items: rows.map(toApiPo), total, poTotal, page, pageSize };
-    }
-    // Điều phối 2 pipeline (refactor 2026-10-26): LIST (pipeline hẹp
-    // — bucket + keyword push sớm) rồi BUCKETS (pipeline rộng — không
-    // bucket). Thứ tự gọi giữ nguyên như searchPurchasesWithBuckets cũ
-    // của repository; kết quả hai mode (sql / memory) không đổi vì cả
-    // hai method đều dùng cùng bộ filter gốc.
     const { rows, total, poTotal } = await PoRepository.searchPurchases(base);
-    const buckets = await PoRepository.countPurchaseBuckets(base);
-    return {
-      items: rows.map(toApiPo),
-      total,
-      poTotal,
-      page,
-      pageSize,
-      bucketCounts: buckets,
-    };
+    const items = rows.map(({ poSort, lotSort, ...row }) => ({ ...row, source: 'mock' }));
+    const response = { items, total, poTotal: Number(poTotal), page, pageSize };
+    if (wantCounts) response.bucketCounts = await PoRepository.countPurchaseBuckets(base);
+    return response;
   }
 
   /**

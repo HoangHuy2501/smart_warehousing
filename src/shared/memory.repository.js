@@ -496,9 +496,6 @@ function makeMemoryRepository() {
       // chỉ đến từ pur_notice2.made_lot (mirror SQL /incoming-pos lotNo NULL).
       lotNo: null,
       assignedQty: assignedQtyOf(o2.id),
-      closed: o1 ? o1.close_sw === 'Y' : false,
-      sheetDate: isoOrNull(o1 ? o1.sheet_date : null),
-      delDate: isoOrNull(o2.del_date),
       source: 'mock',
     };
   }
@@ -788,11 +785,8 @@ function makeMemoryRepository() {
       lotNo: r.lotNo,
       assignedQty: r.assignedQty,
       // no-max (2026-10-29): sheet_qty chỉ tham khảo — mirror SQL SELECT
-      // [sheetQty] (po.repository) + mappers.opt(po.sheetQty).
+      // [sheetQty] (po.repository).
       sheetQty: numOrNull(o2.sheet_qty),
-      closed: o1 ? o1.close_sw === 'Y' : false,
-      sheetDate: isoOrNull(o1 ? o1.sheet_date : null),
-      delDate: isoOrNull(o2.del_date),
       source: 'mock',
     };
   }
@@ -1043,7 +1037,7 @@ function makeMemoryRepository() {
     // PO (t8_pur_order1/2 + notice lookup + GRN) — mirror po.repository
     // ================================================================
     pos: {
-      /** Danh sách PO đến hàng dùng cho bootstrap và /incoming-pos. */
+      /** Danh sách PO đến hàng dùng cho /incoming-pos. */
       listRemainingRows() {
         return [...data.order2]
           .sort((a, b) =>

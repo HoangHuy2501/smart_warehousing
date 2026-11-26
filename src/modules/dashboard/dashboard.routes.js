@@ -7,8 +7,6 @@ const { asyncHandler } = require('../../util/async-handler');
 const { limitSqlReads } = require('../../middleware/sql-load.middleware');
 
 module.exports = function registerDashboardRoutes(router) {
-  router.get('/', requireAuth, limitSqlReads(overviewController.bootstrap));
-
   router.get('/it/workers', requireAuth, requireIt, asyncHandler(itDashboard.workers));
 
   router.get('/it/audit', requireAuth, requireIt, limitSqlReads(itDashboard.audit));

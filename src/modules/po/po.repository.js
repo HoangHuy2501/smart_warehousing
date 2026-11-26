@@ -73,6 +73,7 @@
  */
 
 const db = require('../../config/db');
+const pagination = require('../../util/pagination');
 const { TABLES } = require('../../config/tables');
 
 // ==================== PRIVATE: HỖ TRỢ DIALECT + GUARD ====================
@@ -389,22 +390,17 @@ const INCOMING_PO_FILTER = `
       )
 `;
 
-function incomingPoRows(paginated) {
-  const paging = paginated ? `
-      ORDER BY o2.del_date, CAST(o2.id AS VARCHAR(20))
-      OFFSET ? ROWS FETCH NEXT ? ROWS ONLY` : '';
-  const order = paginated
-    ? 'p.del_date, CAST(p.po_id AS VARCHAR(20))'
-    : 'p.close_sw, p.del_date, p.po_id';
-  return `
+// GET /api/warehouse/incoming-pos — dòng PO còn mở.
+const INCOMING_PO_ROWS = `
     WITH PoRows AS (
       SELECT o2.id AS po_id, o2.sheet_id AS po_sheet_id,
              o1.sheet_no, o2.goods_no, o1.su_name11, o2.sheet_qty,
-             o2.unit_no, o2.sheet_pri, o1.check_sta, o1.close_sw,
-             o1.sheet_date, o2.del_date
+             o2.unit_no, o2.sheet_pri, o1.check_sta, o1.close_sw, o2.del_date
       ${INCOMING_PO_FILTER}
-      ${paging}
     )
+`;
+
+const INCOMING_PO_SELECT = `
     SELECT
       CAST(p.po_id AS VARCHAR(20)) AS [id],
       p.sheet_no AS [poNumber],
@@ -428,16 +424,10 @@ function incomingPoRows(paginated) {
       CAST(NULL AS VARCHAR(40)) AS [lotNo],
       CAST(COALESCE((
         SELECT SUM(a.allocated_qty) FROM whs_slot_allocation a WHERE a.po_id = p.po_id
-      ), 0) AS FLOAT) AS [assignedQty],
-      CAST(CASE WHEN p.close_sw = 'Y' THEN 1 ELSE 0 END AS BIT) AS [closed],
-      p.sheet_date AS [sheetDate],
-      p.del_date AS [delDate],
-      'mock' AS [source]
+      ), 0) AS FLOAT) AS [assignedQty]
     FROM PoRows p
     LEFT JOIN bas_goods g ON g.goods_no = p.goods_no
-    ORDER BY ${order};
-  `;
-}
+`;
 
 // GET /api/warehouse/pos — dữ liệu đủ điều kiện dùng chung cho danh sách,
 // tổng của bộ lọc hiện tại và badge theo ETA. Bảng tạm do fillTempTables nạp.
@@ -561,21 +551,25 @@ function poSearchKeywordParams({ prefixPattern, containsPattern }) {
 class PoModel {
   // GET /api/warehouse/incoming-pos (không phân trang).
   async list() {
-    const { rows } = await db.query(toDialect(incomingPoRows(false)));
+    const { rows } = await db.query(toDialect(`
+      ${INCOMING_PO_ROWS}
+      ${INCOMING_PO_SELECT}
+      ORDER BY p.close_sw, p.del_date, p.po_id;
+    `));
     return rows;
   }
 
-  // GET /api/warehouse/incoming-pos (có phân trang).
+  // GET /api/warehouse/incoming-pos — trang và tổng số dòng.
   async listPaged(page, pageSize) {
-    const offset = (page - 1) * pageSize;
-    const count = await db.query(toDialect(`SELECT COUNT(*) AS [total] ${INCOMING_PO_FILTER};`));
-    const total = Number(count.rows[0]?.total ?? 0);
-    if (offset >= total) return { rows: [], total };
-
-    const params = [offset, pageSize];
-    guardParams(params);
-    const { rows } = await db.query(toDialect(incomingPoRows(true)), params);
-    return { rows, total };
+    const result = await pagination({
+      query: toDialect(INCOMING_PO_SELECT),
+      withSql: toDialect(INCOMING_PO_ROWS),
+      countQuery: toDialect(`SELECT COUNT_BIG(*) AS [total] ${INCOMING_PO_FILTER};`),
+      orderBy: toDialect('[eta], [id]'),
+      page,
+      pageSize,
+    });
+    return { rows: result.data, total: result.pagination.totalItems };
   }
 
   /**
@@ -1243,8 +1237,7 @@ class PoModel {
       const sp = searchParams(opts);
       await this.fillTempTables(query, sp);
 
-      const offset = (opts.page - 1) * opts.pageSize;
-      const filterSql = `
+        const filterSql = `
     FROM eligible u
     WHERE ${PO_SEARCH_KEYWORD_SQL}
     AND (
@@ -1268,18 +1261,8 @@ class PoModel {
       ];
       guardParams(filterParams);
 
-      const counted = await query(toDialect(`${PO_SEARCH_ELIGIBLE_SQL}
-        SELECT COUNT(*) AS [total], COUNT(DISTINCT u.po_number) AS [poTotal]
-        ${filterSql};
-      `), filterParams);
-      const total = Number(counted.rows[0]?.total ?? 0);
-      const poTotal = Number(counted.rows[0]?.poTotal ?? 0);
-
-      let rows = [];
-      if (offset < total) {
-        const rowsParams = [...filterParams, offset, opts.pageSize];
-        guardParams(rowsParams);
-        const result = await query(toDialect(`${PO_SEARCH_ELIGIBLE_SQL}
+      const result = await pagination({
+        query: toDialect(`
     SELECT
       u.id AS [id],
       CAST(u.po_id AS VARCHAR(20)) AS [poLine],
@@ -1297,18 +1280,23 @@ class PoModel {
       u.grn_ref AS [grnRef],
       u.lot_no AS [lotNo],
       CAST(u.assigned_qty AS FLOAT) AS [assignedQty],
-      CAST(0 AS BIT) AS [closed],
-      u.sheet_date AS [sheetDate],
-      u.del_date AS [delDate],
-      'mock' AS [source]
+      u.po_sort AS [poSort],
+      u.lot_sort AS [lotSort]
     ${filterSql}
-    ORDER BY u.del_date ASC, u.po_sort ASC, u.lot_sort ASC
-    OFFSET ? ROWS FETCH NEXT ? ROWS ONLY;
-        `), rowsParams);
-        rows = result.rows;
-      }
+        `),
+        withSql: toDialect(PO_SEARCH_ELIGIBLE_SQL),
+        countQuery: toDialect(`${PO_SEARCH_ELIGIBLE_SQL}
+          SELECT COUNT_BIG(*) AS [total], COUNT(DISTINCT u.po_number) AS [poTotal]
+          ${filterSql};
+        `),
+        params: filterParams,
+        page: opts.page,
+        pageSize: opts.pageSize,
+        orderBy: toDialect('[eta], [poSort], [lotSort]'),
+        execute: query,
+      });
       await this.dropTempTables(query);
-      return { rows, total, poTotal };
+      return { rows: result.data, total: result.pagination.totalItems, poTotal: result.totals?.poTotal ?? 0 };
     });
   }
 

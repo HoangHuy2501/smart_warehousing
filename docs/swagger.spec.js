@@ -482,25 +482,6 @@ function buildSwaggerSpec() {
           },
         },
       },
-      '/api/warehouse': {
-        get: {
-          tags: ['Bootstrap'],
-          summary:
-            'Bootstrap (legacy): lay toan bo du lieu trong 1 call',
-          description:
-            'FE da chuyen sang 5 GET domain rieng (/accounts, /slots, ' +
-            '/lots, /incoming-pos, /activity). Endpoint nay giu lai de ' +
-            'tuong thich — khong xoa.',
-          responses: {
-            200: {
-              description: 'Danh sach accounts, slots, lots, incomingPos, activity',
-              content: {
-                'application/json': { schema: { $ref: '#/components/schemas/Bootstrap' } },
-              },
-            },
-          },
-        },
-      },
       '/api/warehouse/lots': {
         get: {
           tags: ['Lots'],

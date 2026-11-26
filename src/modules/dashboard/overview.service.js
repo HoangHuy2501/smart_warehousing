@@ -1,23 +1,3 @@
-/**
- * SERVICE MỤC TỔNG QUAN — OverviewServices (singleton).
- * Vai trò trong kiến trúc: tầng business logic gom dữ liệu khởi động cho FE
- * + các endpoint danh sách tách riêng (accounts / slots / lots /
- * incoming-pos) — gọi các repository singleton (AccountModel / SlotModel /
- * LotModel / PoModel / ActivityModel), KHÔNG chứa HTTP handler hay SQL thô.
- *
- * Nghiệp vụ:
- *   1. bootstrap : lấy toàn bộ dữ liệu FE cần khi khởi động app:
- *     - accounts  : whs_user_role JOIN t8_bas_emp (demo auth).
- *     - slots     : whs_slots + occupied capacity.
- *     - lots      : whs_slot_allocation (JOIN order2/order1 làm nguồn chính,
- *                   LEFT JOIN notice2 khi đã match) → ILotV2.
- *     - incomingPos: t8_pur_order2/1 (GRN về kệ cả chưa có notice — PO có
- *                   GRN mà chưa assign sẽ hiện ở PoInbox).
- *     - activity  : whs_activity gần nhất.
- *   2. reset : xóa toàn bộ dữ liệu và chạy lại seed-data.js trong
- *     1 transaction (reset.repository.js).
- */
-
 'use strict';
 
 // TẮT RESET TỰ ĐỘNG (yêu cầu 2026-10-16): reset() chỉ chạy khi người dùng
@@ -28,8 +8,6 @@ const {
   toApiAccount,
   toApiSlot,
   toApiLot,
-  toApiPo,
-  toApiActivity,
 } = require('../../shared/mappers');
 const { err, parsePaging, withTestProfile } = require('../../shared/shared');
 // @type cho từng require: module.exports repository bị swap theo DB_MODE
@@ -46,28 +24,9 @@ const PoRepository = require('../po/po.repository');
 /** @type {import('../lots/receipt.repository').ReceiptModel} */
 const ReceiptRepository = require('../lots/receipt.repository');
 const OutboundRepository = require('../outbound/outbound.repository');
-/** @type {import('../activity/activity.repository').ActivityModel} */
-const ActivityRepository = require('../activity/activity.repository');
-
 class OverviewServices {
   /**
-   * Lấy toàn bộ dữ liệu ban đầu cho FE (gọi 1 lần khi load app).
-   * @returns {Promise<{accounts: object[], slots: object[], lots: object[], incomingPos: object[], activity: object[]}>}
-   */
-  async bootstrap() {
-    const [accounts, slots, lots, incomingPos, activity] = await Promise.all([
-      this.listAccounts(),
-      this.listSlots(),
-      this.listLots(),
-      this.listIncomingPos(),
-      ActivityRepository.list(200).then((rows) => rows.map(toApiActivity)),
-    ]);
-
-    return { accounts, slots, lots, incomingPos, activity };
-  }
-
-  /**
-   * GET /accounts — danh sách tài khoản (tách khỏi bootstrap).
+   * GET /accounts — danh sách tài khoản.
    * Không truyền page/pageSize → mảng full như cũ; truyền đi →
    * { items, total, page, pageSize } (phân trang SQL, ORDER BY r.emp_no).
    * @param {object} query - { page?, pageSize? }
@@ -97,7 +56,7 @@ class OverviewServices {
   }
 
   /**
-   * GET /slots — danh sách kệ đầy đủ (tách khỏi bootstrap).
+   * GET /slots — danh sách kệ đầy đủ.
    * Hỗ trợ phân trang: truyền page/pageSize → { items, total, page, pageSize }.
    * @param {object} query - { page?, pageSize? }
    * @returns {Promise<object[]|object>} Mảng full hoặc object phân trang
@@ -121,7 +80,7 @@ class OverviewServices {
   }
 
   /**
-   * GET /lots — danh sách lô (tách khỏi bootstrap).
+   * GET /lots — danh sách lô.
    * Hỗ trợ phân trang: truyền page/pageSize → { items, total, page, pageSize }
    * (ORDER BY allocated_at DESC, id DESC — giống thứ tự bên dưới).
    * @param {object} query - { page?, pageSize? }
@@ -185,7 +144,7 @@ class OverviewServices {
   }
 
   /**
-   * GET /incoming-pos — PO đến hàng (tách khỏi bootstrap).
+   * GET /incoming-pos — PO đến hàng.
    * Hỗ trợ phân trang: truyền page/pageSize → { items, total, page, pageSize }
    * (ORDER BY o1.close_sw, o2.del_date, o2.id — giống repo.pos.list()).
    * @param {object} query - { page?, pageSize? }
@@ -199,7 +158,7 @@ class OverviewServices {
         paging.pageSize
       );
       return {
-        items: rows.map(toApiPo),
+        items: rows.map((row) => ({ ...row, source: 'mock' })),
         total,
         page: paging.page,
         pageSize: paging.pageSize,
@@ -210,7 +169,7 @@ class OverviewServices {
     // '2' < '10' đúng thứ tự.
     const byPoId = (a, b) =>
       Number(a.id) - Number(b.id) || a.id.localeCompare(b.id);
-    return incomingPos.sort(byPoId).map(toApiPo);
+    return incomingPos.sort(byPoId).map((row) => ({ ...row, source: 'mock' }));
   }
 
   /**
