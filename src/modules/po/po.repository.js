@@ -84,6 +84,7 @@ const PO_SEARCH_ELIGIBLE_SQL = `
       o1.sheet_no AS po_number,
       o1.su_name11 AS supplier,
       o1.check_sta AS check_sta,
+      o1.check_date AS po_date,
       o2.goods_no AS item_code,
       g.goods_name AS material,
       o2.unit_no AS unit,
@@ -174,16 +175,13 @@ const PO_SEARCH_ELIGIBLE_SQL = `
       n2.made_lot AS made_lot,
       n2.sheet_qty AS sheet_qty,
       n2.def02 AS def02,
-      n2.unit_no AS unit_no,
-
-      n1.create_date AS create_date
+      n2.unit_no AS unit_no
     FROM candidate_po p
     JOIN pur_notice2 n2
       ON n2.pur_no = p.po_number
      AND n2.goods_no = p.item_code
      AND n2.pur_id = p.sheet_id
      AND ((n2.def02 IS NULL AND p.def02 IS NULL) OR n2.def02 = p.def02)
-    LEFT JOIN pur_notice1 n1 ON n1.sheet_no = n2.sheet_no
     ),
     -- Phiếu nhập của các PO đang xét.
     candidate_receipt AS (
@@ -198,7 +196,7 @@ const PO_SEARCH_ELIGIBLE_SQL = `
       ON p.po_number = i2.pur_no
     ),
     noticed AS (
-      SELECT po_id, SUM(sheet_qty) AS noticed_qty, MAX(create_date) AS latest_create
+      SELECT po_id, SUM(sheet_qty) AS noticed_qty
       FROM candidate_notice
       GROUP BY po_id
     ),
@@ -229,18 +227,12 @@ const PO_SEARCH_ELIGIBLE_SQL = `
         CAST(NULL AS VARCHAR(40)) AS lot_no,
         p.assigned_total AS assigned_qty,
         p.del_date AS del_date,
+        p.po_date AS po_date,
+        p.sheet_id AS po_sheet_id,
         p.po_id AS po_sort,
         0 AS lot_sort
       FROM candidate_po p
       LEFT JOIN noticed nc ON nc.po_id = p.po_id
-      -- Dòng PO chờ giao còn hiện trong cửa sổ tạm nhập 24 giờ.
-      WHERE (
-        nc.po_id IS NULL
-        OR nc.latest_create IS NULL
-        OR nc.latest_create >= DATEADD(HOUR, -24, GETDATE())
-      )
-      -- Lượng tạm nhập quyết định còn dòng chờ giao để hiển thị hay không.
-      AND (p.sheet_qty - COALESCE(nc.noticed_qty, 0)) > 0
     ),
     notice_branch AS (
       SELECT
@@ -261,6 +253,8 @@ const PO_SEARCH_ELIGIBLE_SQL = `
         x.made_lot AS lot_no,
         p2.assigned_total AS assigned_qty,
         p2.del_date AS del_date,
+        p2.po_date AS po_date,
+        p2.sheet_id AS po_sheet_id,
         x.po_id AS po_sort,
         x.notice_id AS lot_sort
       FROM (
@@ -272,7 +266,6 @@ const PO_SEARCH_ELIGIBLE_SQL = `
           n.made_lot,
           n.sheet_qty,
           n.unit_no,
-          n.create_date,
           ROW_NUMBER() OVER (
             PARTITION BY n.notice_id ORDER BY n.po_id ASC
           ) AS rn
@@ -280,14 +273,6 @@ const PO_SEARCH_ELIGIBLE_SQL = `
       ) x
       JOIN candidate_po p2 ON p2.po_id = x.po_id
       WHERE x.rn = 1
-        AND (x.create_date IS NULL
-             OR x.create_date >= DATEADD(HOUR, -24, GETDATE()))
-        AND NOT EXISTS (
-          SELECT 1 FROM candidate_receipt pi
-          WHERE pi.pur_no = x.pur_no
-            AND pi.goods_no = x.goods_no
-            AND pi.made_lot = x.made_lot
-        )
     ),
     eligible AS (
       SELECT * FROM gap
@@ -668,8 +653,56 @@ class PoModel {
       u.lot_no AS [lotNo],
       CAST(u.assigned_qty AS FLOAT) AS [assignedQty],
       u.po_sort AS [poSort],
-      u.lot_sort AS [lotSort]
+      u.lot_sort AS [lotSort],
+      u.po_date AS [po_date],
+      u.po_number AS [po_no],
+      u.po_sheet_id AS [po_id],
+      u.item_code AS [mat_no],
+      u.material AS [mat_name],
+      CAST(u.sheet_qty AS FLOAT) AS [po_qty],
+      CAST(n.sheet_qty AS FLOAT) AS [temp_rcv_qty],
+      CAST(n.sheet_qty1 AS FLOAT) AS [temp_foc_qty],
+      n1.sheet_date AS [temp_rcv_date],
+      u.del_date AS [su_reply_date],
+      CASE WHEN receipt.approved = 1 THEN NULL ELSE eta.days_late END AS [late_date],
+      CAST(n.return_qty AS FLOAT) AS [fail_qty],
+      CAST(n.return_qty1 AS FLOAT) AS [fail_foc_qty],
+      CAST(failure.total_qty AS FLOAT) AS [total_fail_qty],
+      CAST(n.return_qty * 100.0 / NULLIF(n.sheet_qty, 0) AS FLOAT) AS [r_fail_qty],
+      CAST(n.return_qty1 * 100.0 / NULLIF(n.sheet_qty1, 0) AS FLOAT) AS [r_fail_foc_qty],
+      CAST(failure.total_qty * 100.0 / NULLIF(
+        COALESCE(n.sheet_qty, 0) + COALESCE(n.sheet_qty1, 0), 0
+      ) AS FLOAT) AS [r_total_fail_qty],
+      CASE
+        WHEN receipt.approved = 1 THEN N'Đã nhập kho chính thức'
+        WHEN receipt.approved = 0 THEN N'Đã gửi yêu cầu nhập kho chính thức'
+        WHEN n.sheet_sta1 = '1' THEN N'Đã kiểm IQC'
+        WHEN n.id IS NOT NULL THEN N'Đang đợi kiểm IQC'
+        WHEN eta.days_late > 0 THEN N'Lô hàng trễ hẹn'
+        WHEN eta.days_late BETWEEN -3 AND -1 THEN N'Lô hàng dự kiến sắp về'
+        WHEN eta.days_late = 0 THEN N'Lô hàng dự kiến về hôm nay'
+        ELSE N'Lô hàng chưa giao'
+      END AS [status_po]
     FROM eligible u
+    LEFT JOIN pur_notice2 n ON n.id = u.lot_sort AND u.lot_sort <> 0
+    LEFT JOIN pur_notice1 n1 ON n1.sheet_no = n.sheet_no
+    OUTER APPLY (
+      -- Gom phiếu nhập để giữ một dòng kết quả trên mỗi dòng đủ điều kiện.
+      SELECT MAX(CASE WHEN i1.sheet_sta = '1' THEN 1 ELSE 0 END) AS approved
+      FROM pur_in2 i
+      JOIN pur_in1 i1 ON i1.sheet_no = i.sheet_no
+      WHERE i.pur_no = u.po_number
+        AND i.pur_id = u.po_sheet_id
+        AND i.goods_no = u.item_code
+        AND (u.lot_sort = 0 OR (i.notice_no = n.sheet_no AND i.notice_id = n.sheet_id))
+    ) receipt
+    CROSS APPLY (
+      SELECT DATEDIFF(DAY, u.del_date, GETDATE()) AS days_late
+    ) eta
+    CROSS APPLY (
+      SELECT CASE WHEN n.return_qty IS NULL AND n.return_qty1 IS NULL THEN NULL
+                  ELSE COALESCE(n.return_qty, 0) + COALESCE(n.return_qty1, 0) END AS total_qty
+    ) failure
     WHERE ${PO_SEARCH_KEYWORD_SQL}
       `,
       withSql: PO_SEARCH_ELIGIBLE_SQL,
