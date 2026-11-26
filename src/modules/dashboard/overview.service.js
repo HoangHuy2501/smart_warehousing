@@ -12,8 +12,6 @@ const AccountsRepository = require('../accounts/account.repository');
 const SlotRepository = require('../slots/slot.repository');
 /** @type {import('../lots/lot.repository').LotModel} */
 const LotRepository = require('../lots/lot.repository');
-/** @type {import('../po/po.repository').PoModel} */
-const PoRepository = require('../po/po.repository');
 /** @type {import('../lots/receipt.repository').ReceiptModel} */
 const ReceiptRepository = require('../lots/receipt.repository');
 const OutboundRepository = require('../outbound/outbound.repository');
@@ -134,35 +132,6 @@ class OverviewServices {
       outboundQuantities: outbound.get(row.id),
       receiptLots: byAllocation.get(row.id) || [],
     }));
-  }
-
-  /**
-   * GET /incoming-pos — PO đến hàng.
-   * Hỗ trợ phân trang: truyền page/pageSize → { items, total, page, pageSize }
-   * (ORDER BY o1.close_sw, o2.del_date, o2.id — giống repo.pos.list()).
-   * @param {object} query - { page?, pageSize? }
-   * @returns {Promise<object[]|object>} Mảng full hoặc object phân trang
-   */
-  async listIncomingPos(query = {}) {
-    const paging = parsePaging(query);
-    if (paging) {
-      const { rows, total } = await PoRepository.listPaged(
-        paging.page,
-        paging.pageSize
-      );
-      return {
-        items: rows.map((row) => ({ ...row, source: 'mock' })),
-        total,
-        page: paging.page,
-        pageSize: paging.pageSize,
-      };
-    }
-    const incomingPos = await PoRepository.list();
-    // PO id = t8_pur_order2.id (number) — sắp số thay vì chuỗi để
-    // '2' < '10' đúng thứ tự.
-    const byPoId = (a, b) =>
-      Number(a.id) - Number(b.id) || a.id.localeCompare(b.id);
-    return incomingPos.sort(byPoId).map((row) => ({ ...row, source: 'mock' }));
   }
 
   /**

@@ -17,12 +17,6 @@ const listLots = async (req, res) => {
   res.json(await OverviewService.listLots(req.query));
 };
 
-const listIncomingPos = async (req, res) => {
-  res.json(await OverviewService.listIncomingPos(req.query));
-};
-
-// ---- RESET DEMO (dang tat — xem overview.service.js) ----
-
 const reset = async (req, res) => {
   bindActor(req);
   res.status(201).json(await OverviewService.reset());
@@ -32,6 +26,5 @@ module.exports = {
   listAccounts,
   listSlots,
   listLots,
-  listIncomingPos,
   reset,
 };
