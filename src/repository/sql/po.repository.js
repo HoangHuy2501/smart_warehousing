@@ -234,7 +234,7 @@ function guardParams(params) {
  * Pipeline candidate-first #PO -> #Notice -> #PurIn, chạy theo thứ tự
  * DROP temp (dropTempTables) -> fillTempTables (fill #PO -> index #PO ->
  * fill #Notice -> index #Notice -> fill #PurIn -> index #PurIn) ->
- * searchPurchases (câu list + câu count fallback khi trang vượt cuối) /
+ * searchPurchases (đếm tổng rồi lấy danh sách theo trang) /
  * countPurchaseBuckets.
  *
  * RELATION FINAL (test trực tiếp trên dữ liệu T8 thật — KHÔNG quay lại các
@@ -439,12 +439,133 @@ function incomingPoRows(paginated) {
   `;
 }
 
+// GET /api/warehouse/pos — dữ liệu đủ điều kiện dùng chung cho danh sách,
+// tổng của bộ lọc hiện tại và badge theo ETA. Bảng tạm do fillTempTables nạp.
+const PO_SEARCH_ELIGIBLE_SQL = `
+    WITH noticed AS (
+      SELECT po_id, SUM(sheet_qty) AS noticed_qty, MAX(create_date) AS latest_create
+      FROM #Notice
+      GROUP BY po_id
+    ),
+    gap AS (
+      SELECT
+        CAST(p.po_id AS VARCHAR(40)) AS id,
+        p.po_id AS po_id,
+        p.po_number AS po_number,
+        p.item_code AS item_code,
+        p.material AS material,
+        p.supplier AS supplier,
+        (p.sheet_qty - COALESCE(nc.noticed_qty, 0) - p.gap_assigned) AS qty,
+        p.sheet_qty AS sheet_qty,
+        p.unit AS unit,
+        p.unit_price AS unit_price,
+        CASE WHEN p.check_sta = 'Y' THEN 1 ELSE 0 END AS confirmed,
+        p.del_date AS eta,
+        CASE WHEN EXISTS (
+          SELECT 1 FROM #PurIn pi
+          WHERE pi.pur_no = p.po_number AND pi.goods_no = p.item_code
+            AND pi.pur_id = p.sheet_id
+        ) THEN 1 ELSE 0 END AS arrived,
+        (SELECT MAX(pi2.sheet_no) FROM #PurIn pi2
+          WHERE pi2.pur_no = p.po_number AND pi2.goods_no = p.item_code
+            AND pi2.pur_id = p.sheet_id)
+            AS grn_ref,
+        -- Business lot lấy từ dòng tạm nhập.
+        CAST(NULL AS VARCHAR(40)) AS lot_no,
+        p.assigned_total AS assigned_qty,
+        p.del_date AS del_date,
+        p.sheet_date AS sheet_date,
+        p.po_id AS po_sort,
+        0 AS lot_sort
+      FROM #PO p
+      LEFT JOIN noticed nc ON nc.po_id = p.po_id
+      -- Dòng PO chờ giao còn hiện trong cửa sổ tạm nhập 24 giờ.
+      WHERE (
+        nc.po_id IS NULL
+        OR nc.latest_create IS NULL
+        OR nc.latest_create >= DATEADD(HOUR, -24, GETDATE())
+      )
+      -- Lượng tạm nhập quyết định còn dòng chờ giao để hiển thị hay không.
+      AND (p.sheet_qty - COALESCE(nc.noticed_qty, 0)) > 0
+    ),
+    notice_branch AS (
+      SELECT
+        CONCAT(x.po_id, '-N', x.notice_id) AS id,
+        x.po_id AS po_id,
+        p2.po_number AS po_number,
+        p2.item_code AS item_code,
+        p2.material AS material,
+        p2.supplier AS supplier,
+        x.sheet_qty AS qty,
+        p2.sheet_qty AS sheet_qty,
+        x.unit_no AS unit,
+        p2.unit_price AS unit_price,
+        CASE WHEN p2.check_sta = 'Y' THEN 1 ELSE 0 END AS confirmed,
+        p2.del_date AS eta,
+        1 AS arrived,
+        CAST(NULL AS VARCHAR(20)) AS grn_ref,
+        x.made_lot AS lot_no,
+        p2.assigned_total AS assigned_qty,
+        p2.del_date AS del_date,
+        p2.sheet_date AS sheet_date,
+        x.po_id AS po_sort,
+        x.notice_id AS lot_sort
+      FROM (
+        SELECT
+          n.notice_id,
+          n.po_id,
+          n.pur_no,
+          n.goods_no,
+          n.made_lot,
+          n.sheet_qty,
+          n.unit_no,
+          n.create_date,
+          ROW_NUMBER() OVER (
+            PARTITION BY n.notice_id ORDER BY n.po_id ASC
+          ) AS rn
+        FROM #Notice n
+      ) x
+      JOIN #PO p2 ON p2.po_id = x.po_id
+      WHERE x.rn = 1
+        AND (x.create_date IS NULL
+             OR x.create_date >= DATEADD(HOUR, -24, GETDATE()))
+        AND NOT EXISTS (
+          SELECT 1 FROM #PurIn pi
+          WHERE pi.pur_no = x.pur_no
+            AND pi.goods_no = x.goods_no
+            AND pi.made_lot = x.made_lot
+        )
+    ),
+    eligible AS (
+      SELECT * FROM gap
+      UNION ALL
+      SELECT * FROM notice_branch
+    )
+`;
+
+const PO_SEARCH_KEYWORD_SQL = `
+    (
+      CAST(? AS NVARCHAR(140)) IS NULL
+      OR u.po_number LIKE ?
+      OR u.item_code LIKE ?
+      OR u.lot_no LIKE ?
+      OR u.material LIKE ?
+      OR u.supplier LIKE ?
+    )
+`;
+
+function poSearchKeywordParams({ prefixPattern, containsPattern }) {
+  return [prefixPattern, prefixPattern, prefixPattern, prefixPattern, containsPattern, containsPattern];
+}
+
 class PoModel {
+  // GET /api/warehouse/incoming-pos (không phân trang).
   async list() {
     const { rows } = await db.query(toDialect(incomingPoRows(false)));
     return rows;
   }
 
+  // GET /api/warehouse/incoming-pos (có phân trang).
   async listPaged(page, pageSize) {
     const offset = (page - 1) * pageSize;
     const count = await db.query(toDialect(`SELECT COUNT(*) AS [total] ${INCOMING_PO_FILTER};`));
@@ -1113,35 +1234,9 @@ class PoModel {
   }
 
   /**
-   * LIST /pos — PIPELINE HẸP (audit performance 2026-10-19): bucket + keyword
-   * + eligibility + keeper ĐƯỢC ĐẨY VÀO câu fill #PO của fillTempTables =>
-   * candidate PO nhỏ cực đại TRƯỚC khi build #Notice / #PurIn (khi có bucket
-   * cụ thể, không scan toàn bộ lịch sử). Kết quả list trả từ #PO đã lọc.
-   *
-   * Câu SELECT cuối (hiển thị cập nhật 2026-10-29, no-max): gap (qty =
-   * sheet_qty − noticed theo key [R2] − gap_assigned, có thể ≤ 0 khi
-   * over-assign; CHỈ ẩn khi T8-side hết hàng sheet_qty − noticed ≤ 0 —
-   * KHÔNG ẩn do gap_assigned đạt/vượt remaining, sheet_qty chỉ tham khảo)
-   * UNION ALL notice_branch (mỗi đợt tạm nhập 1 dòng; hiện khi create_date
-   * trong 24h và chưa có trong pur_in2 theo [R3]; 1 notice chỉ 1 dòng rn = 1).
-   * Cả 2 nhánh đã qua #PO lọc lifecycle/permission — KHÔNG còn gate
-   * "chưa gán hết theo pur_order" (đã bỏ 2026-10-29). Keyword + bucket ở
-   * câu này là safety net trùng lặp với pushdown. NULL del_date = od3p
-   * (thống nhất countPurchaseBuckets).
-   *
-   * Optimization đếm (counts): total lấy từ COUNT(*) OVER() gắn ngay trong
-   * câu rows (không chạy câu count riêng); CHỈ khi trang vượt cuối (rows rỗng,
-   * page > 1) mới fallback câu count riêng không phân trang — normal case chỉ
-   * 1 query lấy cả rows lẫn total.
-   *
-   * Toàn bộ pipeline + câu SELECT cuối + DROP temp nằm trong 1
-   * withTransaction — temp table phải thấy được xuyên suốt trên cùng
-   * connection (xem fillTempTables).
-   * @param {{ keyword?: string, bucket?: string | null, today: string,
-   *   prevMonthStart: string, twoMonthsAgoStart: string, next3End: string,
-   *   next7End: string, keeperEmpNo?: string | null, page: number,
-   *   pageSize: number }} opts
-   * @returns {Promise<{ rows: Record<string, unknown>[], total: number }>}
+   * GET /api/warehouse/pos — đếm tổng theo bộ lọc, sau đó lấy dữ liệu trang.
+   * Các truy vấn dùng chung dữ liệu đủ điều kiện và bộ lọc từ khóa, ETA.
+   * Giữ bảng tạm trên cùng kết nối trong suốt transaction.
    */
   async searchPurchases(opts) {
     return db.withTransaction(async (query) => {
@@ -1149,134 +1244,9 @@ class PoModel {
       await this.fillTempTables(query, sp);
 
       const offset = (opts.page - 1) * opts.pageSize;
-      const eligibleSql = `
-    -- DECLARE @prefixPattern NVARCHAR(140) = 'PO1%';
-    -- DECLARE @containsPattern NVARCHAR(160) = NULL;
-    -- DECLARE @bucket NVARCHAR(10) = 'od1';
-    -- DECLARE @today DATETIME = '2026-10-20';
-    -- DECLARE @prevMonthStart DATETIME = '2026-09-01';
-    -- DECLARE @twoMonthsAgoStart DATETIME = '2026-08-01';
-    -- DECLARE @next3End DATETIME = '2026-10-24';
-    -- DECLARE @next7End DATETIME = '2026-10-28';
-    -- DECLARE @offset INT = 0;
-    -- DECLARE @pageSize INT = 20;
-    WITH noticed AS (
-      SELECT po_id, SUM(sheet_qty) AS noticed_qty, MAX(create_date) AS latest_create
-      FROM #Notice
-      GROUP BY po_id
-    ),
-    gap AS (
-      SELECT
-        CAST(p.po_id AS VARCHAR(40)) AS id,
-        p.po_id AS po_id,
-        p.po_number AS po_number,
-        p.item_code AS item_code,
-        p.material AS material,
-        p.supplier AS supplier,
-        (p.sheet_qty - COALESCE(nc.noticed_qty, 0) - p.gap_assigned) AS qty,
-        p.sheet_qty AS sheet_qty,
-        p.unit AS unit,
-        p.unit_price AS unit_price,
-        CASE WHEN p.check_sta = 'Y' THEN 1 ELSE 0 END AS confirmed,
-        p.del_date AS eta,
-        CASE WHEN EXISTS (
-          SELECT 1 FROM #PurIn pi
-          WHERE pi.pur_no = p.po_number AND pi.goods_no = p.item_code
-            AND pi.pur_id = p.sheet_id
-        ) THEN 1 ELSE 0 END AS arrived,
-        (SELECT MAX(pi2.sheet_no) FROM #PurIn pi2
-          WHERE pi2.pur_no = p.po_number AND pi2.goods_no = p.item_code
-            AND pi2.pur_id = p.sheet_id)
-            AS grn_ref,
-        -- Gap row CHƯA có tạm nhập nên chưa có business lot (made_lot PO
-        -- không phải lot tạm nhập — 2026-10-29); lot thật chỉ ở notice_branch.
-        CAST(NULL AS VARCHAR(40)) AS lot_no,
-        p.assigned_total AS assigned_qty,
-        p.del_date AS del_date,
-        p.sheet_date AS sheet_date,
-        p.po_id AS po_sort,
-        0 AS lot_sort
-      FROM #PO p
-      LEFT JOIN noticed nc ON nc.po_id = p.po_id
-      -- HIỆN THỊ (2026-10-28): đồng hồ tạm nhập 24h — chưa có notice,
-      -- hoặc notice1.create_date mới nhất còn trong 24h (NULL = hiện)
-      WHERE (
-        nc.po_id IS NULL
-        OR nc.latest_create IS NULL
-        OR nc.latest_create >= DATEADD(HOUR, -24, GETDATE())
-      )
-      -- ẨN gap rỗng (rework 2026-10-29, no-max): chỉ ẩn khi T8 đã tạm nhập
-      -- đủ tham chiếu — sheet_qty − noticed <= 0; KHÔNG trừ gap_assigned
-      -- để tổng allocated đạt/vượt PO không làm row biến mất (user được
-      -- gán vượt PO, sheet_qty chỉ là tham khảo — row có thể hiện với
-      -- qty <= 0 khi over-assign phần chưa tạm nhập). Mirror memory
-      -- repository if (sheet_qty - noticed > 0).
-      AND (p.sheet_qty - COALESCE(nc.noticed_qty, 0)) > 0
-    ),
-    notice_branch AS (
-      SELECT
-        CONCAT(x.po_id, '-N', x.notice_id) AS id,
-        x.po_id AS po_id,
-        p2.po_number AS po_number,
-        p2.item_code AS item_code,
-        p2.material AS material,
-        p2.supplier AS supplier,
-        x.sheet_qty AS qty,
-        p2.sheet_qty AS sheet_qty,
-        x.unit_no AS unit,
-        p2.unit_price AS unit_price,
-        CASE WHEN p2.check_sta = 'Y' THEN 1 ELSE 0 END AS confirmed,
-        p2.del_date AS eta,
-        1 AS arrived,
-        CAST(NULL AS VARCHAR(20)) AS grn_ref,
-        x.made_lot AS lot_no,
-        p2.assigned_total AS assigned_qty,
-        p2.del_date AS del_date,
-        p2.sheet_date AS sheet_date,
-        x.po_id AS po_sort,
-        x.notice_id AS lot_sort
-      FROM (
-        SELECT
-          n.notice_id,
-          n.po_id,
-          n.pur_no,
-          n.goods_no,
-          n.made_lot,
-          n.sheet_qty,
-          n.unit_no,
-          n.create_date,
-          ROW_NUMBER() OVER (
-            PARTITION BY n.notice_id ORDER BY n.po_id ASC
-          ) AS rn
-        FROM #Notice n
-      ) x
-      JOIN #PO p2 ON p2.po_id = x.po_id
-      WHERE x.rn = 1
-        AND (x.create_date IS NULL
-             OR x.create_date >= DATEADD(HOUR, -24, GETDATE()))
-        AND NOT EXISTS (
-          SELECT 1 FROM #PurIn pi
-          WHERE pi.pur_no = x.pur_no
-            AND pi.goods_no = x.goods_no
-            AND pi.made_lot = x.made_lot
-        )
-    ),
-    eligible AS (
-      SELECT * FROM gap
-      UNION ALL
-      SELECT * FROM notice_branch
-    )
-  `;
       const filterSql = `
     FROM eligible u
-    WHERE (
-      CAST(? AS NVARCHAR(140)) IS NULL
-      OR u.po_number LIKE ?
-      OR u.item_code LIKE ?
-      OR u.lot_no LIKE ?
-      OR u.material LIKE ?
-      OR u.supplier LIKE ?
-    )
+    WHERE ${PO_SEARCH_KEYWORD_SQL}
     AND (
       CAST(? AS NVARCHAR(10)) IS NULL
       OR (? = 'overdue' AND (u.del_date IS NULL OR u.del_date < ?))
@@ -1288,8 +1258,7 @@ class PoModel {
     )
   `;
       const filterParams = [
-        sp.prefixPattern, sp.prefixPattern, sp.prefixPattern, sp.prefixPattern,
-        sp.containsPattern, sp.containsPattern,
+        ...poSearchKeywordParams(sp),
         sp.bucket, sp.bucket, sp.today,
         sp.bucket, sp.twoMonthsAgoStart,
         sp.bucket, sp.twoMonthsAgoStart, sp.prevMonthStart,
@@ -1299,7 +1268,7 @@ class PoModel {
       ];
       guardParams(filterParams);
 
-      const counted = await query(toDialect(`${eligibleSql}
+      const counted = await query(toDialect(`${PO_SEARCH_ELIGIBLE_SQL}
         SELECT COUNT(*) AS [total], COUNT(DISTINCT u.po_number) AS [poTotal]
         ${filterSql};
       `), filterParams);
@@ -1310,7 +1279,7 @@ class PoModel {
       if (offset < total) {
         const rowsParams = [...filterParams, offset, opts.pageSize];
         guardParams(rowsParams);
-        const result = await query(toDialect(`${eligibleSql}
+        const result = await query(toDialect(`${PO_SEARCH_ELIGIBLE_SQL}
     SELECT
       u.id AS [id],
       CAST(u.po_id AS VARCHAR(20)) AS [poLine],
@@ -1344,27 +1313,8 @@ class PoModel {
   }
 
   /**
-   * COUNT BUCKET — PIPELINE RỘNG (audit performance 2026-10-19): KHÔNG push
-   * bucket vào #PO (phải đếm TẤT CẢ bucket cùng lúc — bucket=null nên #PO giữ
-   * base rộng), chỉ push keyword + eligibility + keeper. User chấp nhận count
-   * có base rộng hơn list — list không bị ép scan toàn bộ lịch sử (list chạy
-   * pipeline hẹp riêng, 2 pipeline KHÔNG dùng chung #PO vì điều kiện nạp khác
-   * nhau). Trả { [bucket]: count }.
-   *
-   * Câu SQL: COUNT DISTINCT po_number theo bucket ETA — dùng CHÍNH pipeline
-   * #PO/#Notice/#PurIn đã nạp (reuse, không chạy lại từ đầu). Keyword áp dụng,
-   * bucket KHÔNG lọc (đếm tất cả bucket cùng lúc). NULL del_date rơi vào od3p
-   * (match memory bucketOfCase). Bucket mới 2026-10-20: 5 mốc ngày theo thứ
-   * tự twoMonthsAgoStart / prevMonthStart / today / next3End / next7End —
-   * phải khớp search.service (computeBucketDates). Filter approved / M1-M6 /
-   * keeper đã ĐƯỢC push sớm trong câu fill #PO (#PO đã lọc) nên số bucket
-   * tính đúng scope quyền của người xem (keeper chỉ thấy NPL được phân công
-   * active của mình). del_date >= next7End: nằm ngoài 5 bucket -> bucket NULL,
-   * bị loại khỏi kết quả đếm (WHERE t.bucket IS NOT NULL).
-   * @param {{ keyword?: string, today: string, prevMonthStart: string,
-   *   twoMonthsAgoStart: string, next3End: string, next7End: string,
-   *   keeperEmpNo?: string | null }} opts
-   * @returns {Promise<Record<string, number>>} số dòng mỗi bucket
+   * GET /api/warehouse/pos?counts=1 — đếm mã PO duy nhất theo từng nhóm ETA.
+   * Giữ bộ lọc từ khóa và quyền thủ kho để đếm các tab trong cùng request.
    */
   async countPurchaseBuckets(opts) {
     return db.withTransaction(async (query) => {
@@ -1372,83 +1322,8 @@ class PoModel {
       await this.fillTempTables(query, { ...sp, bucket: null });
 
       const sqlBuckets = `
-    -- DECLARE @prefixPattern NVARCHAR(140) = NULL;
-    -- DECLARE @containsPattern NVARCHAR(160) = NULL;
-    -- DECLARE @today DATETIME = '2026-10-20';
-    -- DECLARE @prevMonthStart DATETIME = '2026-09-01';
-    -- DECLARE @twoMonthsAgoStart DATETIME = '2026-08-01';
-    -- DECLARE @next3End DATETIME = '2026-10-24';
-    -- DECLARE @next7End DATETIME = '2026-10-28';
-    WITH noticed AS (
-      SELECT po_id, SUM(sheet_qty) AS noticed_qty, MAX(create_date) AS latest_create
-      FROM #Notice
-      GROUP BY po_id
-    ),
-    gap AS (
-      SELECT
-        p.po_number AS po_number,
-        p.item_code AS item_code,
-        p.material AS material,
-        p.supplier AS supplier,
-        -- Gap row chưa có tạm nhập — chưa có business lot (2026-10-29).
-        CAST(NULL AS VARCHAR(40)) AS lot_no,
-        p.del_date AS del_date
-      FROM #PO p
-      LEFT JOIN noticed nc ON nc.po_id = p.po_id
-      -- HIỆN THỊ (2026-10-28): đồng hồ tạm nhập 24h — chưa có notice hoặc
-      -- notice1.create_date mới nhất còn trong 24h (NULL = hiện)
-      WHERE (
-        nc.po_id IS NULL
-        OR nc.latest_create IS NULL
-        OR nc.latest_create >= DATEADD(HOUR, -24, GETDATE())
-      )
-      -- ẨN gap rỗng (rework 2026-10-29, no-max): chỉ ẩn khi T8 đã tạm nhập
-      -- đủ tham chiếu — sheet_qty − noticed <= 0; KHÔNG trừ gap_assigned
-      -- để tổng allocated đạt/vượt PO không làm row biến mất (user được
-      -- gán vượt PO, sheet_qty chỉ là tham khảo — row có thể hiện với
-      -- qty <= 0 khi over-assign phần chưa tạm nhập). Mirror memory
-      -- repository if (sheet_qty - noticed > 0).
-      AND (p.sheet_qty - COALESCE(nc.noticed_qty, 0)) > 0
-    ),
-    notice_branch AS (
-      SELECT
-        p2.po_number AS po_number,
-        p2.item_code AS item_code,
-        p2.material AS material,
-        p2.supplier AS supplier,
-        x.made_lot AS lot_no,
-        p2.del_date AS del_date
-      FROM (
-        SELECT
-          n.notice_id,
-          n.po_id,
-          n.pur_no,
-          n.goods_no,
-          n.made_lot,
-          n.sheet_qty,
-          n.create_date,
-          ROW_NUMBER() OVER (
-            PARTITION BY n.notice_id ORDER BY n.po_id ASC
-          ) AS rn
-        FROM #Notice n
-      ) x
-      JOIN #PO p2 ON p2.po_id = x.po_id
-      WHERE x.rn = 1
-        AND (x.create_date IS NULL
-             OR x.create_date >= DATEADD(HOUR, -24, GETDATE()))
-        AND NOT EXISTS (
-          SELECT 1 FROM #PurIn pi
-          WHERE pi.pur_no = x.pur_no
-            AND pi.goods_no = x.goods_no
-            AND pi.made_lot = x.made_lot
-        )
-    ),
-    eligible AS (
-      SELECT * FROM gap
-      UNION ALL
-      SELECT * FROM notice_branch
-    )
-    , bucketed AS (
+    ${PO_SEARCH_ELIGIBLE_SQL},
+    bucketed AS (
       SELECT
         u.po_number,
         CASE
@@ -1460,14 +1335,7 @@ class PoModel {
           ELSE NULL
         END AS bucket
       FROM eligible u
-      WHERE (
-        CAST(? AS NVARCHAR(140)) IS NULL
-        OR u.po_number LIKE ?
-        OR u.item_code LIKE ?
-        OR u.lot_no LIKE ?
-        OR u.material LIKE ?
-        OR u.supplier LIKE ?
-      )
+      WHERE ${PO_SEARCH_KEYWORD_SQL}
     )
     SELECT bucket AS [bucket], COUNT(DISTINCT po_number) AS [n]
     FROM bucketed WHERE bucket IS NOT NULL
@@ -1487,13 +1355,7 @@ class PoModel {
         sp.next3End,
         sp.next3End,
         sp.next7End,
-        // KEYWORD: 4 nhánh prefix + 2 contains
-        sp.prefixPattern,
-        sp.prefixPattern,
-        sp.prefixPattern,
-        sp.prefixPattern,
-        sp.containsPattern,
-        sp.containsPattern,
+        ...poSearchKeywordParams(sp),
       ];
       guardParams(bucketsParams);
       const bucketsResult = await query(toDialect(sqlBuckets), bucketsParams);
