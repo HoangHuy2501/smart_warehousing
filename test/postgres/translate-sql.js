@@ -63,6 +63,10 @@ function toPostgresSql(text) {
     /CONVERT\s*\(\s*DATE\s*,\s*([A-Za-z_][\w.]*)\s*\)/gi,
     (_m, col) => `CAST(${col} AS DATE)`
   );
+  out = out.replace(
+    /DATEDIFF\s*\(\s*DAY\s*,\s*([A-Za-z_][\w.]*)\s*,\s*NOW\s*\(\s*\)\s*\)/gi,
+    (_m, col) => `(CURRENT_DATE - CAST(${col} AS DATE))`
+  );
   out = out.replace(/\bDATETIME\b/g, 'TIMESTAMP');
   // 6. Tiền tố bảng sandbox — thay tên logic bằng tên thật (kèm tiền tố).
   for (const [logical, actual] of TABLE_PAIRS) {
