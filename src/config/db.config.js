@@ -1,11 +1,11 @@
 /**
- * Cau hinh nguon du lieu cua server (SQL Server / PostgreSQL test / in-memory).
+ * Cau hinh nguon du lieu cua server (SQL Server / PostgreSQL test).
  *
  * Thu tu uu tien:
  *   1. DB_MODE=sqlserver (+ cac bien MSSQL_*)  -> SQL Server (moi truong that cua team).
  *   2. DB_MODE=test-postgres, hoac tu dong phat hien SUDA_DATABASE_URL
  *      -> PostgreSQL test rieng cua MiaoDa trong sandbox (xem test/db.test.config.js).
- *   3. Con lai -> in-memory (mock trong RAM, mat du lieu khi restart server).
+ *   3. Mặc định dùng SQL Server.
  *
  * Cac bien SQL Server (quy trinh chuan cua team):
  *   MSSQL_HOST            ten may / IP cua SQL Server
@@ -44,7 +44,6 @@ function resolveMssqlConfig() {
  */
 function resolveDbConfig() {
   const mode = String(process.env.DB_MODE || '').trim().toLowerCase();
-  if (mode === 'memory') return { mode: 'memory' };
 
   if (mode === 'sqlserver' || (!mode && process.env.MSSQL_HOST)) {
     return { mode: 'sqlserver', mssql: resolveMssqlConfig() };
@@ -54,7 +53,8 @@ function resolveDbConfig() {
     return { mode: 'test-postgres', pg: buildTestPostgresConfig() };
   }
 
-  return { mode: 'memory' };
+  if (mode) throw new Error('DB_MODE phải là sqlserver hoặc test-postgres');
+  return { mode: 'sqlserver', mssql: resolveMssqlConfig() };
 }
 
 module.exports = { resolveDbConfig };

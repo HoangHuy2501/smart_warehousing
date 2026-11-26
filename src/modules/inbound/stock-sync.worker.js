@@ -2,7 +2,6 @@
 
 require('dotenv').config({ path: require('path').join(__dirname, '..', '..', '..', '.env') });
 
-const db = require('../../config/db');
 const workerConfig = require('../../config/worker.config');
 const { createAppWorker } = require('../../util/worker/create-app-worker');
 const { getWorkerQueue, closeQueues } = require('../../util/worker/queue');
@@ -15,7 +14,6 @@ const queueName = 'stock-sync';
 const logger = createWorkerLogger('stock-sync-worker');
 
 async function main() {
-    if (db.getMode() === 'memory') throw new Error('Stock sync requires a SQL database');
     const problems = workerConfig.validateWorkerConfig(process.env.NODE_ENV === 'production');
     for (const problem of problems) logger.warn('worker_config_invalid', { problem });
     if (problems.length && process.env.NODE_ENV === 'production') {

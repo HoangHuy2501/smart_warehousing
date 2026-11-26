@@ -40,7 +40,6 @@
  * chọn cuối để chạy trong transaction bên ngoài (pattern reset như các
  * repo khác).
  *
- * DB_MODE=memory thì module.exports swap sang cắt lát của memory
  * repository (xem cuối file).
  */
 
@@ -538,11 +537,5 @@ class MaterialModel {
   }
 }
 
-const { getMemoryRepository } = require('../../shared/memory.repository');
-
-if (db.getMode() === 'memory') {
-  module.exports = getMemoryRepository().materials;
-} else {
-  module.exports = new MaterialModel();
-  module.exports.MaterialModel = MaterialModel; // for reset.repository tx use
-}
+module.exports = new MaterialModel();
+module.exports.MaterialModel = MaterialModel;

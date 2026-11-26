@@ -23,8 +23,6 @@
  * DDL sandbox (test-postgres) được test tự tạo qua lark-cli +db-execute —
  * bảng thật của user CHỈ tạo khi user chạy migration proposal.
  *
- * DB_MODE=memory thì module.exports swap sang cắt lát của memory
- * repository (bảng in-memory luôn "tồn tại" → test logic thật).
  */
 
 const db = require('../../config/db');
@@ -493,11 +491,5 @@ class ReconcileIssueRepository {
     }
 }
 
-const { getMemoryRepository } = require('../../shared/memory.repository');
-
-if (db.getMode() === 'memory') {
-    module.exports = getMemoryRepository().reconcileIssue;
-} else {
-    module.exports = new ReconcileIssueRepository();
-    module.exports.ReconcileIssueRepository = ReconcileIssueRepository;
-}
+module.exports = new ReconcileIssueRepository();
+module.exports.ReconcileIssueRepository = ReconcileIssueRepository;

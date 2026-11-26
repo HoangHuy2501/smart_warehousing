@@ -53,9 +53,6 @@ const receiptSync = require('./receipt-sync.service');
 const { enqueueReceiptSync } = require('./receipt-sync.queue');
 /** @type {import('./receipt-sync.repository').ReceiptSyncModel} */
 const ReceiptSyncRepository = require('./receipt-sync.repository');
-// @type cho từng require: module.exports repository bị swap theo DB_MODE
-// (memory slice / new XxxModel()) nên editor không tự suy ra kiểu — gắn
-// JSDoc để go-to-definition / F12 nhảy thẳng sang method của class.
 /** @type {import('./lot.repository').LotModel} */
 const LotRepository = require('./lot.repository');
 /** @type {import('../slots/slot.repository').SlotModel} */
@@ -246,7 +243,7 @@ class LotServices {
    */
   async injectIqcResult(lotId, dto) {
     // (#6) MANUAL IQC = T8 SIMULATOR ONLY: endpoint này là đường IQC
-    // giả lập cho memory/test — trên DB_MODE=sqlserver thật phải tắt để
+    // giả lập cho PostgreSQL test — trên DB_MODE=sqlserver thật phải tắt để
     // không bypass IQC Auto Sync (IQC Worker là luồng production duy
     // nhất, và KHÔNG path nào được set IN_STOCK từ manual IQC).
     if (manualIqcDisabled(db.getMode())) err('iqc_manual_disabled', 403);
@@ -415,7 +412,7 @@ class LotServices {
     const qty = Number(dto.qty);
     if (!Number.isFinite(qty) || qty <= 0) err('qty_invalid');
     const now = new Date().toISOString();
-    const outboundEnabled = db.getMode() !== 'memory' && Boolean(process.env.OUTBOUND_SYNC_START_DATE);
+    const outboundEnabled = Boolean(process.env.OUTBOUND_SYNC_START_DATE);
     let resyncTargetId;
     let movedWhole = false;
     try {

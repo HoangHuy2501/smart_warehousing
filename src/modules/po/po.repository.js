@@ -619,7 +619,7 @@ class PoModel {
    * — JOIN o2 theo candidate po_ids rồi áp cùng relation [R2] (KHÔNG đổi
    * matching rule, KHÔNG GROUP toàn pur_notice2 #12, KHÔNG dùng
    * n2.pur_id = o2.id). Mỗi dòng kèm [poId] để caller group theo PO
-   * trong memory. ORDER BY o2.id, n2.id.
+   * trong service. ORDER BY o2.id, n2.id.
    * @param {number[]} poIds danh sách pur_order2.id (rỗng → [])
    * @returns {Promise<Array<Record<string, unknown> & { poId: number }>>}
    */
@@ -810,11 +810,5 @@ class PoModel {
 
 }
 
-const { getMemoryRepository } = require('../../shared/memory.repository');
-
-if (db.getMode() === 'memory') {
-  module.exports = getMemoryRepository().pos;
-} else {
-  module.exports = new PoModel();
-  module.exports.PoModel = PoModel; // for reset.repository tx use
-}
+module.exports = new PoModel();
+module.exports.PoModel = PoModel;

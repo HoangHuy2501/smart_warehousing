@@ -58,7 +58,6 @@
  *     decreaseAllocationQty).
  *   - closed_at KHÔNG đồng nghĩa RETURNED — chỉ là đã rời kệ.
  *
- * DB_MODE=memory thì module.exports swap sang cắt lát của memory
  * repository (xem cuối file).
  */
 
@@ -297,16 +296,7 @@ class LotModel {
     return rows;
   }
 
-  /**
-   * Phân trang lô (GET /lots?page=&pageSize=) — 2 câu SQL inline chạy
-   * song song (Promise.all): câu SELECT phân trang + câu COUNT toàn bảng.
-   * Thứ tự giống listLots của service (assignedAt DESC, id DESC) — trang
-   * nào cũng ra cùng thứ tự nên không lặp/thiếu dòng khi chuyển trang.
-   * COUNT đếm trực tiếp bảng allocation (JOIN 1-1, không fan-out).
-   * @param {number} page trang 1-indexed
-   * @param {number} pageSize số dòng mỗi trang
-   * @returns {Promise<{ rows: Record<string, unknown>[], total: number }>}
-   */
+  // Danh sách và tổng số dòng dùng cùng bộ lọc.
   async listPaged(page, pageSize) {
 
     const sql = `
@@ -1390,11 +1380,5 @@ class LotModel {
   }
 }
 
-const { getMemoryRepository } = require('../../shared/memory.repository');
-
-if (db.getMode() === 'memory') {
-  module.exports = getMemoryRepository().lots;
-} else {
-  module.exports = new LotModel();
-  module.exports.LotModel = LotModel; // for reset.repository tx use
-}
+module.exports = new LotModel();
+module.exports.LotModel = LotModel;

@@ -32,9 +32,6 @@ const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
 const { err, withTestProfile } = require('../../shared/shared');
 const { toApiAccount } = require('../../shared/mappers');
-// @type cho từng require: module.exports repository bị swap theo DB_MODE
-// (memory slice / new XxxModel()) nên editor không tự suy ra kiểu — gắn
-// JSDoc để go-to-definition / F12 nhảy thẳng sang method của class.
 /** @type {import('../accounts/account.repository').AccountModel} */
 const AccountsRepository = require('../accounts/account.repository');
 

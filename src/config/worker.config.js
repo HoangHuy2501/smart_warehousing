@@ -152,9 +152,6 @@ function validateWorkerConfig(isProduction) {
         if (!process.env.JWT_SECRET) {
             problems.push('Production phải set JWT_SECRET');
         }
-        if (process.env.DB_MODE === 'memory') {
-            problems.push('Production cấm DB_MODE=memory');
-        }
     }
     return problems;
 }

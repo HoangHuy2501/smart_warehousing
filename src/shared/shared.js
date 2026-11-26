@@ -21,9 +21,6 @@
 
 const { ApiError } = require('../util/api-error');
 const { findTestProfile } = require('../config/test-accounts');
-// @type cho từng require: module.exports repository bị swap theo DB_MODE
-// (memory slice / new XxxModel()) nên editor không tự suy ra kiểu — gắn
-// JSDoc để go-to-definition / F12 nhảy thẳng sang method của class.
 /** @type {import('../modules/accounts/account.repository').AccountModel} */
 const AccountsRepository = require('../modules/accounts/account.repository');
 /** @type {import('../modules/activity/activity.repository').ActivityModel} */
@@ -130,6 +127,7 @@ class SharedService {
       {
         id: genId('act'),
         ...entry,
+        actedAt: entry.actedAt || new Date().toISOString(),
         // user_name NOT NULL — nếu tài khoản chưa có hồ sơ t8_bas_emp
         // (ghi t8 đang tắt) thì dùng mã nhân sự để nhật ký không crash.
         userName: entry.userName ?? entry.userId,

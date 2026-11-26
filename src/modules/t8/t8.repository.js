@@ -6,7 +6,7 @@
  * Kiến trúc (refactor 2026-10-26 lần 2 theo yêu cầu user — SQL thực thi
  * trực tiếp trong method, không còn tầng hàm sqlXxx/exec): T8Model là
  * class singleton (module.exports = new, kèm giữ class cho
- * reset.repository dùng tx); MỖI public method tự khai báo câu SQL ngay
+ * transaction); mỗi method khai báo SQL ngay
  * trong thân method (const sql = `...`) và tự gọi
  * db.query(toDialect(sql), params) — không còn hàm dựng SQL riêng, cũng
  * không còn wrapper thực thi dùng chung. Tham số bind QUA PLACEHOLDER `?`
@@ -35,7 +35,6 @@
  * về null, phần SQL ghi giữ trong comment ngay tại method để mở lại dễ
  * dàng. KHÔNG re-enable khi chưa hỏi user.
  *
- * DB_MODE=memory thì module.exports swap sang cắt lát t8 của memory
  * repository (xem cuối file).
  */
 
@@ -389,7 +388,7 @@ class T8Model {
     // goods_no + def02 (NULL-safe) VÀ pur_id = o2.sheet_id (PO identity
     // fix 2026-10-29 — pur_id là sheet_id dòng PO, KHÔNG phải order2.id;
     // điều kiện ngày def23 đã bỏ theo user duyệt 2026-10-28); KHÔNG dùng
-    // sheet_lot. Mirror memory: noticesOfOrder2(). Lấy notice cuối cùng
+    // sheet_lot. Lấy notice cuối cùng
     // theo id (ORDER BY n2.id DESC).
     const sqlNotice = `
     -- DECLARE @poId INT = 3;
@@ -681,11 +680,5 @@ class T8Model {
   }
 }
 
-const { getMemoryRepository } = require('../../shared/memory.repository');
-
-if (db.getMode() === 'memory') {
-  module.exports = getMemoryRepository().t8;
-} else {
-  module.exports = new T8Model();
-  module.exports.T8Model = T8Model; // giữ class cho reset.repository dùng tx
-}
+module.exports = new T8Model();
+module.exports.T8Model = T8Model;

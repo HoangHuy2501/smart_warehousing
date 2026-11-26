@@ -1,7 +1,5 @@
 'use strict';
 
-process.env.DB_MODE = 'memory';
-
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const db = require('../src/config/db');
@@ -17,7 +15,6 @@ const slot = { code, warehouse: 'GIF3', row: 'A1', floor: '01', position: '06', 
 
 function setup(t, id = 'TEST-MGR', role = 'MANAGER') {
     const query = () => assert.fail('repository mocks should handle SQL');
-    t.mock.method(db, 'getMode', () => 'sqlserver');
     t.mock.method(db, 'withTransaction', async (callback) => callback(query));
     t.mock.method(shared, 'getActor', async () => ({ id, role, active: true }));
     t.mock.method(shared, 'logActivity', async () => {});

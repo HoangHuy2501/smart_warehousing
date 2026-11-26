@@ -39,7 +39,6 @@
  * REFETCH bằng câu SQL byCode / movementById khai báo inline trong method
  * để trả shape camelCase đầy đủ (row OUTPUT có key snake_case).
  *
- * DB_MODE=memory thì module.exports swap sang cắt lát của memory
  * repository (xem cuối file).
  */
 
@@ -266,14 +265,7 @@ class SlotModel {
     return rows; // SQL đã alias đầy đủ camelCase
   }
 
-  /**
-   * Phân trang kệ (GET /slots?page=&pageSize=). total = COUNT qua
-   * subselect (GROUP BY rồi 1 dòng/kệ) — 2 câu chạy song song Promise.all.
-   * ORDER BY s.code cần thiết cho OFFSET/FETCH.
-   * @param {number} page trang 1-indexed
-   * @param {number} pageSize số dòng mỗi trang
-   * @returns {Promise<{ rows: Record<string, unknown>[], total: number }>}
-   */
+  // Danh sách và tổng số dòng dùng cùng bộ lọc.
   async listPaged(page, pageSize) {
     const sql = `
     SELECT
@@ -624,11 +616,5 @@ class SlotModel {
   }
 }
 
-const { getMemoryRepository } = require('../../shared/memory.repository');
-
-if (db.getMode() === 'memory') {
-  module.exports = getMemoryRepository().slots;
-} else {
-  module.exports = new SlotModel();
-  module.exports.SlotModel = SlotModel; // for reset.repository tx use
-}
+module.exports = new SlotModel();
+module.exports.SlotModel = SlotModel;

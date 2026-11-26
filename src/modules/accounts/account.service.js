@@ -33,9 +33,6 @@ const db = require('../../config/db');
 const audit = require('../../util/sql-audit');
 const { err, shared, withTestProfile } = require('../../shared/shared');
 const { toApiAccount, toApiSlot } = require('../../shared/mappers');
-// @type cho từng require: module.exports repository bị swap theo DB_MODE
-// (memory slice / new XxxModel()) nên editor không tự suy ra kiểu — gắn
-// JSDoc để go-to-definition / F12 nhảy thẳng sang method của class.
 /** @type {import('./account.repository').AccountModel} */
 const AccountsRepository = require('./account.repository');
 /** @type {import('../t8/t8.repository').T8Model} */

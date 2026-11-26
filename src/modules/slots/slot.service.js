@@ -26,9 +26,6 @@ const db = require('../../config/db');
 const audit = require('../../util/sql-audit');
 const T8Slots = require('./t8-slot.repository');
 const { t8WarehouseNumbers } = require('../../config/warehouse.config');
-// @type cho từng require: module.exports repository bị swap theo DB_MODE
-// (memory slice / new XxxModel()) nên editor không tự suy ra kiểu — gắn
-// JSDoc để go-to-definition / F12 nhảy thẳng sang method của class.
 /** @type {import('./slot.repository').SlotModel} */
 const SlotRepository = require('./slot.repository');
 /** @type {import('../accounts/account.repository').AccountModel} */
@@ -41,7 +38,7 @@ function warehouseNumber(slot) {
 }
 
 async function lockSlot(code, query) {
-  if (db.getMode() !== 'memory') await T8Slots.lock(code, query);
+  await T8Slots.lock(code, query);
 }
 
 async function checkT8Slot(code, stNo, query) {
@@ -72,7 +69,6 @@ function slotFields(dto) {
 }
 
 async function createT8Slot(slot, actor, query) {
-  if (db.getMode() === 'memory') return;
   const stNo = warehouseNumber(slot);
   if (await checkT8Slot(slot.code, stNo, query)) {
     await T8Slots.rename(slot.code, slot.code, stNo, t8ModifyUser(actor), query);
@@ -82,7 +78,6 @@ async function createT8Slot(slot, actor, query) {
 }
 
 async function renameT8Slot(oldSlot, newSlot, actor, query) {
-  if (db.getMode() === 'memory') return;
   const stNo = warehouseNumber(oldSlot);
   const exists = await checkT8Slot(oldSlot.code, stNo, query);
   if ((await T8Slots.find(newSlot.code, query)).length) err('t8_slot_conflict', 409);

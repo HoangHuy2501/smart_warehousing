@@ -79,8 +79,6 @@ Response: `{ items: IIncomingPo[], total, page, pageSize, buckets: { today, upco
 
 Exclusion: notice lines already in `t8_pur_in2` are dropped **per line** (`notice_id` + `goods_no`), so a fully received notice lot disappears from the inbox. `poLine` stays `order2.id` in both kinds, so `POST /assign` is unaffected.
 
-> Memory-mode note: the in-memory T8 simulator (`ensureNoticeForPo`) can create a notice covering the **full** PO qty for an unmatched allocation; in that edge the gap row collapses to 0 and only the notice row remains (`qty = full PO qty`). SQL modes never auto-create notices (t8 writes disabled).
-
 ### GET `/slots/search?keyword=` — slot code search
 Returns `{ codes: string[] }` (max ~20, prefix/substring match on slot code). Used by the shelf-picker autocomplete. **Moved from `/slots?keyword=`** on 2026-10-16 because `GET /slots` is now the full slot list.
 

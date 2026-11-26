@@ -32,7 +32,6 @@
  * tự refetch để dựng domain object; fallback hồ sơ test và mapping
  * nghiệp vụ nằm ở service (services/shared.js withTestProfile).
  *
- * DB_MODE=memory thì module.exports swap sang cắt lát của memory
  * repository (xem cuối file).
  */
 
@@ -91,61 +90,6 @@ const ACCOUNT_COLUMNS = {
   active: 'active',
 };
 
-// Các field kiểu JSON — ghi xuống DB dưới dạng chuỗi JSON.stringify
-// (nếu có trong columnMap), đọc lên service tự parse lại.
-const JSON_FIELDS = ['iqcHistory'];
-
-/**
- * Dựng câu INSERT động từ domain object camelCase qua columnMap (cột thay
- * đổi theo object runtime nên không thể viết tĩnh). Chỉ nhận cột có trong
- * columnMap (whitelist). Vị trí mệnh đề lấy về dòng vừa ghi khác nhau
- * theo dialect: SQL Server đặt OUTPUT inserted.* TRƯỚC VALUES; PG bắt
- * RETURNING ở CUỐI câu — sai vị trí là PG từ chối cú pháp.
- * @param {string} table tên bảng thật (đã qua TABLES)
- * @param {Record<string, unknown>} obj domain object camelCase
- * @param {Record<string, string>} columnMap map camelCase -> tên cột DB
- * @returns {{ text: string, values: unknown[] } | null} null nếu không có cột hợp lệ
- */
-function buildInsert(table, obj, columnMap) {
-  const keys = Object.keys(obj).filter((key) => columnMap[key] !== undefined);
-  if (keys.length === 0) return null;
-
-  const cols = keys.map((key) => columnMap[key]);
-  const values = keys.map((key) => {
-    if (JSON_FIELDS.includes(key)) {
-      return obj[key] === null || obj[key] === undefined ? null : JSON.stringify(obj[key]);
-    }
-    return obj[key] === undefined ? null : obj[key];
-  });
-  const placeholders = keys.map(() => '?').join(', ');
-
-  const text = isPg()
-    ? `INSERT INTO ${table} (${cols.join(', ')}) VALUES (${placeholders}) RETURNING *`
-    : `INSERT INTO ${table} (${cols.join(', ')}) OUTPUT inserted.* VALUES (${placeholders})`;
-
-  return { text, values };
-}
-
-/**
- * Dựng câu INSERT trực tiếp từ row có key = TÊN CỘT DB (snake_case) —
- * dùng cho seed (key trùng tên cột).
- * @param {string} table tên bảng thật
- * @param {Record<string, unknown>} row row key = tên cột DB
- * @returns {{ text: string, values: unknown[] } | null} null nếu row rỗng
- */
-function buildRawInsert(table, row) {
-  const keys = Object.keys(row);
-  if (keys.length === 0) return null;
-
-  const cols = keys.join(', ');
-  const placeholders = keys.map(() => '?').join(', ');
-  const text = isPg()
-    ? `INSERT INTO ${table} (${cols}) VALUES (${placeholders}) RETURNING *`
-    : `INSERT INTO ${table} (${cols}) OUTPUT inserted.* VALUES (${placeholders})`;
-
-  return { text, values: keys.map((key) => row[key]) };
-}
-
 /**
  * Dựng câu UPDATE động từ patch camelCase (chỉ những field có trong patch
  * + columnMap — không đè field không truyền).
@@ -161,12 +105,7 @@ function buildUpdate(table, patch, whereKey, whereValue, columnMap, allowedRoles
   if (keys.length === 0) return null;
 
   const sets = keys.map((key) => `${columnMap[key]} = ?`);
-  const values = keys.map((key) => {
-    if (JSON_FIELDS.includes(key)) {
-      return patch[key] === null || patch[key] === undefined ? null : JSON.stringify(patch[key]);
-    }
-    return patch[key] === undefined ? null : patch[key];
-  });
+  const values = keys.map((key) => patch[key] ?? null);
   values.push(whereValue, ...(allowedRoles || []));
   const roleFilter = allowedRoles ? ` AND role IN (${allowedRoles.map(() => '?').join(', ')})` : '';
 
@@ -203,13 +142,7 @@ class AccountModel {
     return rows;
   }
 
-  /**
-   * Phân trang tài khoản (GET /accounts?page=&pageSize=). total = COUNT
-   * qua subselect dùng đúng tập hợp — 2 câu chạy song song Promise.all.
-   * @param {number} page trang 1-indexed
-   * @param {number} pageSize số dòng mỗi trang
-   * @returns {Promise<{ rows: Record<string, unknown>[], total: number }>}
-   */
+  // Danh sách và tổng số dòng dùng cùng bộ lọc.
   async listPaged(page, pageSize) {
 
     const listSql = `
@@ -257,39 +190,23 @@ class AccountModel {
     return rows[0] || null;
   }
 
-  /**
-   * Thêm tài khoản (chỉ whs_user_role) từ domain object camelCase
-   * (ĐỘNG — buildInsert): employeeCode, role, locked, password, active.
-   * Trả thẳng raw row vừa ghi (cột whs_user_role) — service tự đọc lại
-   * bằng byId khi cần shape đầy đủ (JOIN t8_bas_emp).
-   * @param {Record<string, unknown>} account domain object camelCase
-   * @returns {Promise<Record<string, unknown> | null>} raw row vừa ghi hoặc null
-   */
+  // POST /accounts — tạo tài khoản kho.
   async insert(account, query = db.query) {
-    const insert = buildInsert(TABLES.userRole, account, ACCOUNT_COLUMNS);
-    if (!insert) return null;
+    const sql = `
+      INSERT INTO ${TABLES.userRole} (emp_no, role, locked, password, active)
+      ${isPg() ? '' : 'OUTPUT inserted.*'}
+      VALUES (?, ?, ?, ?, ?)
+      ${isPg() ? 'RETURNING *' : ''}
+    `;
+    const params = [account.employeeCode, account.role, account.locked ?? false,
+      account.password, account.active ?? true];
     try {
-      const { rows } = await query(insert.text, insert.values);
+      const { rows } = await query(sql, params);
       return rows[0] || null;
     } catch (error) {
       if ([2601, 2627].includes(error.number) || error.code === '23505') return null;
       throw error;
     }
-  }
-
-  /**
-   * Thêm tài khoản từ row có key = tên cột DB (snake_case) — dùng cho
-   * seed. Tham số `query` tùy chọn: reset truyền txQuery để chạy trong
-   * cùng transaction. Trả raw row vừa ghi — caller hiện tại (seed /
-   * ensureStartup) không dùng giá trị trả về, chỉ cần ghi thành công.
-   * @param {Record<string, unknown>} row row key = tên cột DB
-   * @param {Function} [query] bộ query (mặc định db.query)
-   * @returns {Promise<Record<string, unknown> | null>} raw row vừa ghi hoặc null
-   */
-  async insertRaw(row, query = db.query) {
-    const insert = buildRawInsert(TABLES.userRole, row);
-    const { rows } = await query(insert.text, insert.values);
-    return rows[0] || null;
   }
 
   /**
@@ -372,11 +289,5 @@ class AccountModel {
   }
 }
 
-const { getMemoryRepository } = require('../../shared/memory.repository');
-
-if (db.getMode() === 'memory') {
-  module.exports = getMemoryRepository().accounts;
-} else {
-  module.exports = new AccountModel();
-  module.exports.AccountModel = AccountModel; // for reset.repository tx use
-}
+module.exports = new AccountModel();
+module.exports.AccountModel = AccountModel;

@@ -10,9 +10,7 @@
  *
  * Ngoai ra cung cap `withTransaction(fn)` de chay nhieu lenh trong 1 transaction:
  *   await withTransaction(async (query) => { await query('INSERT ...', [...]); });
- *
- * Khi khong co cau hinh DB nao (mode memory) -> query() tra ve null,
- * cac module se chon repository in-memory thay the.
+
  */
 
 'use strict';
@@ -28,7 +26,7 @@ function getDialect() {
   return mode === 'sqlserver' ? 'mssql' : 'pg';
 }
 
-/** Mode DB hien tai ('sqlserver' | 'test-postgres' | 'memory') — chi doc env, khong ket noi. */
+/** Mode DB hien tai ('sqlserver' | 'test-postgres') — chi doc env, khong ket noi. */
 function getMode() {
   return resolveDbConfig().mode;
 }
@@ -40,11 +38,9 @@ async function getExecutor() {
     if (cfg.mode === 'sqlserver') {
       const mssql = require('mssql');
       state = { dialect: 'mssql', pool: new mssql.ConnectionPool(cfg.mssql) };
-    } else if (cfg.mode === 'test-postgres') {
+    } else {
       const { Pool } = require('pg');
       state = { dialect: 'pg', pool: new Pool(cfg.pg.pool) };
-    } else {
-      return null;
     }
   }
   if (state.dialect === 'mssql' && !state.pool.connected) {
@@ -88,7 +84,6 @@ async function executeSqlServerRequest(request, text, params) {
 /** Chay 1 cau lenh SQL voi tham so, tra ve { rows }. */
 async function query(text, params = []) {
   const executor = await getExecutor();
-  if (!executor) return null;
 
   if (executor.dialect === 'mssql') {
     return executeSqlServerRequest(executor.pool.request(), text, params);
@@ -106,7 +101,6 @@ async function query(text, params = []) {
  */
 async function withTransaction(fn) {
   const executor = await getExecutor();
-  if (!executor) return fn(query);
 
   if (executor.dialect === 'mssql') {
     const mssql = require('mssql');

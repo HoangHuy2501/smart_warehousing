@@ -1,18 +1,11 @@
 'use strict';
 
-// TẮT RESET TỰ ĐỘNG (yêu cầu 2026-10-16): reset() chỉ chạy khi người dùng
-// chủ động gọi POST /api/warehouse/reset — không bao giờ tự chạy khi khởi động.
-// const { buildSeed } = require('../../config/seed-data');
-// const ResetRepository = require('./reset.repository');
 const {
   toApiAccount,
   toApiSlot,
   toApiLot,
 } = require('../../shared/mappers');
 const { err, parsePaging, withTestProfile } = require('../../shared/shared');
-// @type cho từng require: module.exports repository bị swap theo DB_MODE
-// (memory slice / new XxxModel()) nên editor không tự suy ra kiểu — gắn
-// JSDoc để go-to-definition / F12 nhảy thẳng sang method của class.
 /** @type {import('../accounts/account.repository').AccountModel} */
 const AccountsRepository = require('../accounts/account.repository');
 /** @type {import('../slots/slot.repository').SlotModel} */
@@ -174,13 +167,10 @@ class OverviewServices {
 
   /**
    * Reset dữ liệu về seed ban đầu (demo) — ĐÃ TẮT (2026-10-16):
-   * tránh xóa nhầm dữ liệu thật của team; mở lại bằng cách uncomment
-   * resetAll bên dưới khi cần demo từ đầu.
    * @returns {Promise<void>}
    * @throws {ApiError} reset_disabled (400) — luôn ném cho tới khi bật lại
    */
   async reset() {
-    // await ResetRepository.resetAll(buildSeed());
     err('reset_disabled', 400);
   }
 }

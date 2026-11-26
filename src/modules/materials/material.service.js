@@ -25,9 +25,6 @@
 'use strict';
 
 const { err, genId, shared } = require('../../shared/shared');
-// @type cho từng require: module.exports repository bị swap theo DB_MODE
-// (memory slice / new XxxModel()) nên editor không tự suy ra kiểu — gắn
-// JSDoc để go-to-definition / F12 nhảy thẳng sang method của class.
 /** @type {import('./material.repository').MaterialModel} */
 const MaterialRepository = require('./material.repository');
 

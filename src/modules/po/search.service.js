@@ -37,9 +37,6 @@
 
 const { toApiActivity } = require('../../shared/mappers');
 const { computeBucketDates } = require('../../util/bucket-dates');
-// @type cho từng require: module.exports repository bị swap theo DB_MODE
-// (memory slice / new XxxModel()) nên editor không tự suy ra kiểu — gắn
-// JSDoc để go-to-definition / F12 nhảy thẳng sang method của class.
 /** @type {import('./po.repository').PoModel} */
 const PoRepository = require('./po.repository');
 /** @type {import('../slots/slot.repository').SlotModel} */
@@ -86,7 +83,6 @@ class SearchServices {
     const pageSize = parsePageSize(query.pageSize, 15);
     const wantCounts = String(query.counts ?? '1') !== '0';
     // Biến bucket mới (2026-10-20): hàm dùng chung bucket-dates.js —
-    // SQL mode và memory mode KHÔNG bao giờ lệch boundary.
     const ranges = computeBucketDates();
     const base = {
       keyword: kw,
