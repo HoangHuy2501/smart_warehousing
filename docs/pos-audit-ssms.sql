@@ -1,7 +1,7 @@
 /* =============================================================================
    GET /pos AUDIT TREN SQL SERVER (T8) — sinh tu code 2026-10-19
    File     : smart_whs_v3/docs/pos-audit-ssms.sql
-   Nguon    : src/repository/sql/queries/po.queries.js (fillPoTemp / fillNoticeTemp /
+   Nguon    : src/modules/po/po.repository.js (fillPoTemp / fillNoticeTemp /
               fillPurInTemp / searchPurchasesFinal / countPurchaseBucketsFinal)
    Muc dich : do STATISTICS IO / TIME cua pipeline /pos SAU khi fix audit:
      1) close_sw IN ('N','0') loc ngay tai fillPoTemp

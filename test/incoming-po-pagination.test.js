@@ -6,7 +6,7 @@ const db = require('../src/config/db');
 
 test('incoming PO counts separately and loads page details after pagination', async (t) => {
     t.mock.method(db, 'getMode', () => 'sqlserver');
-    const { PoModel } = require('../src/repository/sql/po.repository');
+    const { PoModel } = require('../src/modules/po/po.repository');
     const repo = new PoModel();
     const item = { id: '41', poNumber: 'PO' };
     const query = t.mock.method(db, 'query', async (sql) => ({

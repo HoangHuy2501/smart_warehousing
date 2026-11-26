@@ -2,7 +2,7 @@
 
 const assert = require('node:assert/strict');
 const { test } = require('node:test');
-const { validEndpoint } = require('../src/services/push-device.service');
+const { validEndpoint } = require('../src/modules/outbound/push-device.service');
 
 test('accepts HTTPS delivery endpoints for supported browsers', () => {
     assert.equal(validEndpoint('https://fcm.googleapis.com/fcm/send/test'), true);

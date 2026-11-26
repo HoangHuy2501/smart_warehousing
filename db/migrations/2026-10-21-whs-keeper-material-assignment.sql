@@ -6,8 +6,7 @@
 -- 2026-10-21). Script idempotent: chạy lại không tạo trùng.
 --
 -- Đối tác code:
---   - src/repository/sql/queries/material.queries.js (SQL hàm)
---   - src/repository/sql/material.repository.js        (Model)
+--   - src/modules/materials/material.repository.js        (Model)
 --   - /pos JOIN: IX_whs_kma_keeper_active
 --   - history:   IX_whs_kma_goods_history
 --   - assign chạy trong db.withTransaction -> không vi phạm UQ

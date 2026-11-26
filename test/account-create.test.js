@@ -4,8 +4,8 @@ process.env.DB_MODE = 'memory';
 
 const assert = require('node:assert/strict');
 const { test } = require('node:test');
-const accounts = require('../src/services/account.service');
-const employees = require('../src/repository/sql/t8.repository');
+const accounts = require('../src/modules/accounts/account.service');
+const employees = require('../src/modules/t8/t8.repository');
 
 test('manager looks up and creates one keeper account by employee code', async () => {
   await employees.createEmployee({ id: 999, emp_no: '00042', emp_name: 'Nhân viên mẫu' });

@@ -15,7 +15,7 @@ async function main() {
   const check = await db.query('SELECT COUNT(*)::int AS n FROM whs3_t8_pur_order2', []);
   console.log('[data] t8_pur_order2 rows =', check.rows[0].n);
 
-  const PoRepository = require('../src/repository/sql/po.repository');
+  const PoRepository = require('../src/modules/po/po.repository');
 
   const t = (() => {
     const d = new Date();

@@ -3,8 +3,8 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const db = require('../src/config/db');
-const repo = require('../src/repository/sql/outbound.repository');
-const { removeDeletedWaitingLine } = require('../src/services/outbound.service');
+const repo = require('../src/modules/outbound/outbound.repository');
+const { removeDeletedWaitingLine } = require('../src/modules/outbound/outbound.service');
 
 test('checks T8 again under the outbound lock before deleting a waiting line', async (t) => {
     const tx = () => assert.fail('repository methods should receive the transaction');

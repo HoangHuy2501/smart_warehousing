@@ -46,11 +46,11 @@ POST /assign (lot.service)
 | `src/util/worker/graceful-shutdown.js` | SIGTERM/SIGINT handler, chạy các bước ngược thứ tự |
 | `src/util/worker/errors.js` | 3 error class + `isRetryableError()` |
 | `src/util/worker/logger.js` | Structured JSON logger (`scope` + `event` + context fields) |
-| `src/queues/receipt-sync.queue.js` | `enqueueReceiptSync` / `scheduleReceiptSyncRetry` (producer side) |
-| `src/worker/receipt-sync.worker.js` | Entrypoint process worker, upsert sweep scheduler |
-| `src/services/jobs/receipt-sync.job.js` | Đọc job.data → gọi service → xử lý state → log |
-| `src/services/receipt-sync.service.js` | State machine 8 trạng thái, transaction WHS writes |
-| `src/repository/sql/receipt-sync.repository.js` | Read WHS/T8 + write receipt (parameterized, tx-aware) |
+| `src/modules/lots/receipt-sync.queue.js` | `enqueueReceiptSync` / `scheduleReceiptSyncRetry` (producer side) |
+| `src/modules/lots/receipt-sync.worker.js` | Entrypoint process worker, upsert sweep scheduler |
+| `src/modules/lots/receipt-sync.job.js` | Đọc job.data → gọi service → xử lý state → log |
+| `src/modules/lots/receipt-sync.service.js` | State machine 8 trạng thái, transaction WHS writes |
+| `src/modules/lots/receipt-sync.repository.js` | Read WHS/T8 + write receipt (parameterized, tx-aware) |
 
 ## Chạy local
 

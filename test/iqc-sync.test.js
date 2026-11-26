@@ -27,14 +27,14 @@ const fs = require('fs');
 const path = require('path');
 
 const db = require('../src/config/db');
-const { TABLES } = require('../src/repository/sql/tables');
-const IqcSyncRepository = require('../src/repository/sql/iqc-sync.repository');
-const iqcSyncService = require('../src/services/iqc-sync.service');
-const { syncAllocation: syncStock } = require('../src/services/stock-sync.service');
-const stockRepository = require('../src/repository/sql/stock-sync.repository');
+const { TABLES } = require('../src/config/tables');
+const IqcSyncRepository = require('../src/modules/iqc/iqc-sync.repository');
+const iqcSyncService = require('../src/modules/iqc/iqc-sync.service');
+const { syncAllocation: syncStock } = require('../src/modules/inbound/stock-sync.service');
+const stockRepository = require('../src/modules/inbound/stock-sync.repository');
 const { previousMonthCutoff } = require('../src/util/month-cutoff');
-const OverviewService = require('../src/services/overview.service');
-const { manualIqcDisabled } = require('../src/services/lot.service');
+const OverviewService = require('../src/modules/dashboard/overview.service');
+const { manualIqcDisabled } = require('../src/modules/lots/lot.service');
 
 const STATES = iqcSyncService.IQC_SYNC_STATES;
 
@@ -68,11 +68,11 @@ let empNo = null;
 // File source IQC — dùng cho case S/T (static guard: không IN_STOCK,
 // không ghi T8).
 const IQC_SOURCE_FILES = [
-    'src/services/iqc-sync.service.js',
-    'src/services/jobs/iqc-sync.job.js',
-    'src/worker/iqc-sync.worker.js',
-    'src/repository/sql/iqc-sync.repository.js',
-    'src/queues/iqc-sync.queue.js',
+    'src/modules/iqc/iqc-sync.service.js',
+    'src/modules/iqc/iqc-sync.job.js',
+    'src/modules/iqc/iqc-sync.worker.js',
+    'src/modules/iqc/iqc-sync.repository.js',
+    'src/modules/iqc/iqc-sync.queue.js',
 ].map((file) => path.join(__dirname, '..', file));
 
 /** Tìm (hoặc tạo) 1 kệ dùng cho allocation test. */

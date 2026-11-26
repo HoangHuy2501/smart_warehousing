@@ -3,8 +3,8 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const db = require('../src/config/db');
-const repo = require('../src/repository/sql/outbound.repository');
-const service = require('../src/services/outbound.service');
+const repo = require('../src/modules/outbound/outbound.repository');
+const service = require('../src/modules/outbound/outbound.service');
 
 const cases = [
     { name: 'converts outbound units into stock units', qty: '1746', rate: '2', expected: 873 },

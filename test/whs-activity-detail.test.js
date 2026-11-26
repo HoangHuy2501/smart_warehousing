@@ -5,12 +5,12 @@ process.env.DB_MODE = 'memory';
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const audit = require('../src/util/sql-audit');
-const { shared } = require('../src/services/shared');
-const activities = require('../src/repository/sql/activity.repository');
-const slots = require('../src/repository/sql/slot.repository');
-const lots = require('../src/repository/sql/lot.repository');
-const receipts = require('../src/repository/sql/receipt.repository');
-const lotService = require('../src/services/lot.service');
+const { shared } = require('../src/shared/shared');
+const activities = require('../src/modules/activity/activity.repository');
+const slots = require('../src/modules/slots/slot.repository');
+const lots = require('../src/modules/lots/lot.repository');
+const receipts = require('../src/modules/lots/receipt.repository');
+const lotService = require('../src/modules/lots/lot.service');
 
 test('formats typed SQL audit values and protects multi-line context boundaries', () => {
     assert.equal(audit.insert('whs_slots', {

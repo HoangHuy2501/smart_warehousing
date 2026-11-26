@@ -12,7 +12,7 @@
  *   await withTransaction(async (query) => { await query('INSERT ...', [...]); });
  *
  * Khi khong co cau hinh DB nao (mode memory) -> query() tra ve null,
- * repository/index.js se chon repository in-memory thay the.
+ * cac module se chon repository in-memory thay the.
  */
 
 'use strict';
@@ -74,22 +74,24 @@ function convertPlaceholders(text, token) {
   return text.replace(/\?/g, () => token.replace('{n}', (index += 1)));
 }
 
+async function executeSqlServerRequest(request, text, params) {
+  const mssql = require('mssql');
+  const named = convertPlaceholders(text, '@p{n}');
+  params.forEach((value, i) => {
+    request.input(`p${i + 1}`, mssqlInputType(mssql, value), value);
+  });
+  // Duy trì bảng tạm theo session và thời hạn SQL của request HTTP.
+  const result = await executeBatch(request, named);
+  return { rows: result.recordset || [] };
+}
+
 /** Chay 1 cau lenh SQL voi tham so, tra ve { rows }. */
 async function query(text, params = []) {
   const executor = await getExecutor();
   if (!executor) return null;
 
   if (executor.dialect === 'mssql') {
-    const mssql = require('mssql');
-    const request = executor.pool.request();
-    const named = convertPlaceholders(text, '@p{n}');
-    params.forEach((value, i) => {
-      request.input(`p${i + 1}`, mssqlInputType(mssql, value), value);
-    });
-    // .batch() = goi SQL_BATCH truc tiep (session scope) thay vi sp_executesql
-    // cua .query() — #temp table (#PO/#Notice/#PurIn) ton tai qua nhieu cau lenh.
-    const result = await executeBatch(request, named);
-    return { rows: result.recordset || [] };
+    return executeSqlServerRequest(executor.pool.request(), text, params);
   }
 
   const numbered = convertPlaceholders(text, '${n}');
@@ -111,15 +113,8 @@ async function withTransaction(fn) {
     const tx = new mssql.Transaction(executor.pool);
     await tx.begin();
     try {
-      const out = await fn(async (text, params = []) => {
-        const request = tx.request();
-        const named = convertPlaceholders(text, '@p{n}');
-        params.forEach((value, i) => {
-          request.input(`p${i + 1}`, mssqlInputType(mssql, value), value);
-        });
-        const result = await executeBatch(request, named);
-        return { rows: result.recordset || [] };
-      });
+      const out = await fn((text, params = []) =>
+        executeSqlServerRequest(tx.request(), text, params));
       await tx.commit();
       return out;
     } catch (error) {

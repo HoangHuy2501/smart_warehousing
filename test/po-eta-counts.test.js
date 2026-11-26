@@ -7,7 +7,7 @@ const db = require('../src/config/db');
 test('PO ETA totals use the same filters as the list without page limits', async (t) => {
     t.mock.method(db, 'getMode', () => 'sqlserver');
     t.mock.method(db, 'getDialect', () => 'mssql');
-    const { PoModel } = require('../src/repository/sql/po.repository');
+    const { PoModel } = require('../src/modules/po/po.repository');
     const repo = new PoModel();
     const calls = [];
     t.mock.method(db, 'withTransaction', async (fn) => fn(async (sql, params = []) => {

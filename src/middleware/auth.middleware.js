@@ -10,7 +10,7 @@
 'use strict';
 
 const { ApiError } = require('../util/api-error');
-const AuthService = require('../services/auth.service');
+const AuthService = require('../modules/auth/auth.service');
 
 function requireAuth(req, res, next) {
   const token = req.get('x-auth-token');

@@ -33,7 +33,7 @@ services:
     volumes:
       - .:/app
       - /app/node_modules
-    command: ./node_modules/.bin/nodemon -L --signal SIGTERM --watch src --ext js,json --delay 1 src/worker/receipt-sync.worker.js
+    command: ./node_modules/.bin/nodemon -L --signal SIGTERM --watch src --ext js,json --delay 1 src/modules/lots/receipt-sync.worker.js
     depends_on:
       - redis
     restart: unless-stopped
@@ -52,7 +52,7 @@ services:
     volumes:
       - .:/app
       - /app/node_modules
-    command: ./node_modules/.bin/nodemon -L --signal SIGTERM --watch src --ext js,json --delay 1 src/worker/iqc-sync.worker.js
+    command: ./node_modules/.bin/nodemon -L --signal SIGTERM --watch src --ext js,json --delay 1 src/modules/iqc/iqc-sync.worker.js
     depends_on:
       - redis
     restart: unless-stopped
@@ -71,7 +71,7 @@ services:
     volumes:
       - .:/app
       - /app/node_modules
-    command: ./node_modules/.bin/nodemon -L --signal SIGTERM --watch src --ext js,json --delay 1 src/worker/stock-sync.worker.js
+    command: ./node_modules/.bin/nodemon -L --signal SIGTERM --watch src --ext js,json --delay 1 src/modules/inbound/stock-sync.worker.js
     depends_on:
       - redis
     restart: unless-stopped
@@ -91,7 +91,7 @@ services:
     volumes:
       - .:/app
       - /app/node_modules
-    command: ./node_modules/.bin/nodemon -L --signal SIGTERM --watch src --ext js,json --delay 1 src/worker/outbound.worker.js
+    command: ./node_modules/.bin/nodemon -L --signal SIGTERM --watch src --ext js,json --delay 1 src/modules/outbound/outbound.worker.js
     depends_on:
       - redis
     restart: unless-stopped

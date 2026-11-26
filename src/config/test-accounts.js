@@ -8,7 +8,7 @@
  * - ho so ten/email la du lieu raw o day: khi account chua co ho so
  *   trong t8_bas_emp thi mapper lay ten/email tu day (khong ghi t8_*).
  * - khi tich hop du lieu that, xoa file nay + hai diem dung no
- *   (repository/index.js ensureTestAccounts, account.repository.js
+ *   (modules/accounts/account-startup.service.js, account.repository.js
  *   mapAccountRow) la het; khong anh huong logic khac.
  */
 

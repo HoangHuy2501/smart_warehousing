@@ -3,14 +3,14 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const db = require('../src/config/db');
-const { shared } = require('../src/services/shared');
-const allocations = require('../src/repository/sql/iqc-sync.repository');
-const locks = require('../src/repository/sql/receipt-sync.repository');
-const slots = require('../src/repository/sql/slot.repository');
-const stock = require('../src/repository/sql/stock-sync.repository');
-const t8 = require('../src/repository/sql/t8-receipt.repository');
-const { preview, send } = require('../src/services/send-stock.service');
-const { syncAllocation } = require('../src/services/stock-sync.service');
+const { shared } = require('../src/shared/shared');
+const allocations = require('../src/modules/iqc/iqc-sync.repository');
+const locks = require('../src/modules/lots/receipt-sync.repository');
+const slots = require('../src/modules/slots/slot.repository');
+const stock = require('../src/modules/inbound/stock-sync.repository');
+const t8 = require('../src/modules/inbound/t8-receipt.repository');
+const { preview, send } = require('../src/modules/inbound/send-stock.service');
+const { syncAllocation } = require('../src/modules/inbound/stock-sync.service');
 
 for (const scenario of [
     { name: 'đã duyệt đủ', imported: 100, draft: 0 },

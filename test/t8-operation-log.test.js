@@ -3,7 +3,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const db = require('../src/config/db');
-const log = require('../src/repository/sql/t8-operation-log.repository');
+const log = require('../src/modules/t8/t8-operation-log.repository');
 
 const names = ['user_no', 'log_desc', 'modify_date', 'oper_type', 'win_desc', 'win_name', 'extra_field'];
 
