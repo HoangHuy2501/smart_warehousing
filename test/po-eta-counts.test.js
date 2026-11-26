@@ -39,3 +39,30 @@ test('PO ETA totals use the same filters as the list without page limits', async
     assert.deepEqual(await repo.countPurchaseBuckets(filters), [{ bucket: 'overdue', n: 9 }]);
     assert.match(calls.find(({ sql }) => sql.includes('FROM bucketed')).sql, /SELECT 'overdue', COUNT\(DISTINCT po_number\)/);
 });
+
+test('PO page and badge totals start together when counts are enabled', async (t) => {
+    const service = require('../src/modules/po/search.service');
+    const started = [];
+    let release;
+    const pending = new Promise((resolve) => { release = resolve; });
+    t.mock.method(db, 'query', async (sql) => {
+        const kind = sql.includes('FROM bucketed') ? 'buckets'
+            : sql.includes('OFFSET') ? 'page' : 'total';
+        started.push(kind);
+        await pending;
+        if (kind === 'total') return { rows: [{ totalItems: 1, totalDistinct: 1 }] };
+        if (kind === 'buckets') return { rows: [{ bucket: 'overdue', n: 1 }] };
+        return { rows: [{ id: '14' }] };
+    });
+
+    const result = service.searchPos({ counts: '1' });
+    const firstStarts = [...started].sort();
+    release();
+    assert.deepEqual((await result).bucketCounts, { overdue: 1 });
+    assert.deepEqual(firstStarts, ['buckets', 'page', 'total']);
+
+    started.length = 0;
+    const withoutBadges = await service.searchPos({ counts: '0' });
+    assert.deepEqual(started.sort(), ['page', 'total']);
+    assert.equal(Object.hasOwn(withoutBadges, 'bucketCounts'), false);
+});
