@@ -6,6 +6,7 @@ const db = require('../src/config/db');
 
 test('incoming PO counts separately and paginates the result', async (t) => {
     t.mock.method(db, 'getMode', () => 'sqlserver');
+    t.mock.method(db, 'getDialect', () => 'mssql');
     const { PoModel } = require('../src/modules/po/po.repository');
     const repo = new PoModel();
     const item = { id: '41', poNumber: 'PO' };

@@ -37,6 +37,7 @@
  */
 
 const db = require('../../config/db');
+const pagination = require('../../util/pagination');
 const { TABLES } = require('../../config/tables');
 
 // ==================== PRIVATE: HỖ TRỢ DIALECT + GUARD ====================
@@ -210,11 +211,8 @@ class AccountModel {
    * @returns {Promise<{ rows: Record<string, unknown>[], total: number }>}
    */
   async listPaged(page, pageSize) {
-    const offset = (page - 1) * pageSize;
 
     const listSql = `
-    -- DECLARE @offset INT = 0;
-    -- DECLARE @pageSize INT = 20;
     SELECT
       r.emp_no AS [id],
       e.emp_name AS [name],
@@ -226,35 +224,14 @@ class AccountModel {
       r.active AS [active]
     FROM whs_user_role r
     LEFT JOIN bas_emp e ON e.emp_no = r.emp_no
-    ORDER BY r.emp_no
-    OFFSET ? ROWS FETCH NEXT ? ROWS ONLY
     `;
-    const listParams = [offset, pageSize];
-
-    // COUNT qua subselect trên đúng tập dữ liệu của list (kể cả LEFT JOIN)
-    // — không tham số.
-    const countSql = `
-    -- DECLARE khong can tham so.
-    SELECT COUNT(*) AS [total]
-    FROM (
-      SELECT r.emp_no, r.role, r.password, r.locked, r.active,
-             e.emp_name
-      FROM whs_user_role r
-      LEFT JOIN bas_emp e ON e.emp_no = r.emp_no
-    ) sub
-    `;
-    const countParams = [];
-
-    guardParams(listParams);
-    guardParams(countParams);
-    const [list, counted] = await Promise.all([
-      db.query(toDialect(listSql), listParams),
-      db.query(toDialect(countSql), countParams),
-    ]);
-    return {
-      rows: list.rows,
-      total: Number(counted.rows[0] ? counted.rows[0].total : 0),
-    };
+    const result = await pagination({
+      query: toDialect(listSql),
+      orderBy: toDialect('[id]'),
+      page,
+      pageSize,
+    });
+    return { rows: result.data, total: result.pagination.totalItems };
   }
 
   /** Tìm tài khoản theo emp_no (= account id) — null nếu không có dòng. */

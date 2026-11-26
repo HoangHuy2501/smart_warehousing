@@ -44,6 +44,7 @@
  */
 
 const db = require('../../config/db');
+const pagination = require('../../util/pagination');
 const { TABLES } = require('../../config/tables');
 
 /** Tên bảng logic (viết trong SQL) -> tên thật (kèm tiền tố nếu có). */
@@ -274,10 +275,7 @@ class SlotModel {
    * @returns {Promise<{ rows: Record<string, unknown>[], total: number }>}
    */
   async listPaged(page, pageSize) {
-    const offset = (page - 1) * pageSize;
     const sql = `
-    -- DECLARE @offset INT = 0;
-    -- DECLARE @pageSize INT = 20;
     SELECT
       s.code AS [code],
       s.warehouse AS [warehouse],
@@ -296,36 +294,14 @@ class SlotModel {
     LEFT JOIN whs_slot_allocation a ON a.slot_code = s.code
     GROUP BY s.code, s.warehouse, s.slot_row, s.floor, s.position,
              s.keeper_emp_no, s.locked, s.is_full, s.active
-    ORDER BY s.code
-    OFFSET ? ROWS FETCH NEXT ? ROWS ONLY
-  `;
-    const sqlCount = `
-    -- DECLARE khong can tham so.
-    SELECT COUNT(*) AS [total]
-    FROM (
-      SELECT
-        s.code, s.warehouse, s.slot_row, s.floor, s.position,
-        s.keeper_emp_no, s.locked, s.is_full, s.active,
-        COALESCE(SUM(CASE WHEN a.closed_at IS NULL THEN a.allocated_qty ELSE 0 END), 0)
-          AS occupied_capacity
-      FROM whs_slots s
-      LEFT JOIN whs_slot_allocation a ON a.slot_code = s.code
-      GROUP BY s.code, s.warehouse, s.slot_row, s.floor, s.position,
-               s.keeper_emp_no, s.locked, s.is_full, s.active
-    ) sub
-  `;
-    const listParams = [offset, pageSize];
-    const countParams = [];
-    guardParams(listParams);
-    guardParams(countParams);
-    const [list, counted] = await Promise.all([
-      db.query(toDialect(sql), listParams),
-      db.query(toDialect(sqlCount), countParams),
-    ]);
-    return {
-      rows: list.rows,
-      total: Number(counted.rows[0] ? counted.rows[0].total : 0),
-    };
+    `;
+    const result = await pagination({
+      query: toDialect(sql),
+      orderBy: toDialect('[code]'),
+      page,
+      pageSize,
+    });
+    return { rows: result.data, total: result.pagination.totalItems };
   }
 
   /**

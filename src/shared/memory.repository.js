@@ -1214,7 +1214,7 @@ function makeMemoryRepository() {
         const overdue = new Set(['od1', 'od2', 'od3p'].flatMap((bucket) => [...(seen.get(bucket) ?? [])]));
         const counts = { overdue: overdue.size };
         for (const [bucket, set] of seen) counts[bucket] = set.size;
-        return counts;
+        return Object.entries(counts).map(([bucket, n]) => ({ bucket, n }));
       },
       // searchPurchasesWithBuckets đã xóa (refactor 2026-10-26 theo mẫu
       // Kanban): service tự điều phối searchPurchases + countPurchase

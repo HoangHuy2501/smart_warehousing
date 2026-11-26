@@ -63,6 +63,7 @@
  */
 
 const db = require('../../config/db');
+const pagination = require('../../util/pagination');
 const { TABLES } = require('../../config/tables');
 
 // ==================== PRIVATE: HỖ TRỢ DIALECT + THỰC THI ====================
@@ -307,11 +308,8 @@ class LotModel {
    * @returns {Promise<{ rows: Record<string, unknown>[], total: number }>}
    */
   async listPaged(page, pageSize) {
-    const offset = (page - 1) * pageSize;
 
     const sql = `
-    -- DECLARE @offset INT = 0;
-    -- DECLARE @pageSize INT = 20;
     SELECT
       a.id AS [id],
       COALESCE(o1.sheet_no, o2.sheet_no) AS [poNumber],
@@ -370,27 +368,14 @@ class LotModel {
       GROUP BY i2.pur_no, i2.pur_id, i2.goods_no
     ) grn ON grn.pur_no = o1.sheet_no AND grn.pur_id = o2.sheet_id
      AND grn.goods_no = a.goods_no
-    ORDER BY a.allocated_at DESC, a.id DESC
-    OFFSET ? ROWS FETCH NEXT ? ROWS ONLY;
-  `;
-    const params = [offset, pageSize];
-
-    const sqlCount = `
-    -- DECLARE khong can tham so.
-    SELECT COUNT(*) AS [total] FROM whs_slot_allocation;
-  `;
-    const countParams = [];
-
-    guardParams(params);
-    guardParams(countParams);
-    const [list, counted] = await Promise.all([
-      db.query(toDialect(sql), params),
-      db.query(toDialect(sqlCount), countParams),
-    ]);
-    return {
-      rows: list.rows,
-      total: Number(counted.rows[0] ? counted.rows[0].total : 0),
-    };
+    `;
+    const result = await pagination({
+      query: toDialect(sql),
+      orderBy: toDialect('[assignedAt] DESC, [id] DESC'),
+      page,
+      pageSize,
+    });
+    return { rows: result.data, total: result.pagination.totalItems };
   }
 
   /**

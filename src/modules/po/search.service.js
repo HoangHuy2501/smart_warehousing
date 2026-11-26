@@ -101,7 +101,10 @@ class SearchServices {
     const { rows, total, poTotal } = await PoRepository.searchPurchases(base);
     const items = rows.map(({ poSort, lotSort, ...row }) => ({ ...row, source: 'mock' }));
     const response = { items, total, poTotal: Number(poTotal), page, pageSize };
-    if (wantCounts) response.bucketCounts = await PoRepository.countPurchaseBuckets(base);
+    if (wantCounts) {
+      const counts = await PoRepository.countPurchaseBuckets(base);
+      response.bucketCounts = Object.fromEntries(counts.map(({ bucket, n }) => [bucket, Number(n)]));
+    }
     return response;
   }
 

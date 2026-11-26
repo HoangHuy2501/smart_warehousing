@@ -23,11 +23,14 @@ async function pagination({
   if (typeof orderBy !== 'string' || !orderBy.trim()) throw new Error('ORDER BY is required');
 
   const base = query.trim().replace(/;+\s*$/, '');
+  const countExpression = execute === db.query && db.getDialect() === 'pg'
+    ? 'COUNT(*) AS "totalItems"'
+    : 'COUNT_BIG(*) AS [totalItems]';
   let totals;
   let totalItems = null;
   if (count) {
     const { rows } = await execute(countQuery ??
-      `${withSql} SELECT COUNT_BIG(*) AS [totalItems] FROM (${base}) AS pg_source`, countParams);
+      `${withSql} SELECT ${countExpression} FROM (${base}) AS pg_source`, countParams);
     totals = rows[0];
     totalItems = Number(totals?.totalItems ?? totals?.total ?? 0);
     if (!Number.isSafeInteger(totalItems)) throw new Error('Total count exceeds safe JS integer range');

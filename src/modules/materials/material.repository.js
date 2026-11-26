@@ -45,6 +45,7 @@
  */
 
 const db = require('../../config/db');
+const pagination = require('../../util/pagination');
 const { TABLES } = require('../../config/tables');
 
 /** Tên bảng logic (viết trong SQL) -> tên thật (kèm tiền tố nếu có). */
@@ -156,20 +157,15 @@ class MaterialModel {
    * @returns {Promise<{ rows: Record<string, unknown>[], total: number }>}
    */
   async listPaged(opts) {
-    const offset = (opts.page - 1) * opts.pageSize;
     const searchPattern = opts.search ? `%${opts.search}%` : null;
     const sql = `
-    -- DECLARE @searchPattern NVARCHAR(200) = N'%thep%'; -- NULL = khong loc
-    -- DECLARE @offset INT = 0;
-    -- DECLARE @pageSize INT = 10;
     SELECT
       g.goods_no AS [goodsNo],
       g.goods_name AS [goodsName],
       a.keeper_emp_no AS [keeperEmpNo],
       e.emp_name AS [keeperName],
       a.assigned_at AS [assignedAt],
-      CAST(CASE WHEN a.id IS NULL THEN 0 ELSE 1 END AS BIT) AS [isAssigned],
-      COUNT(*) OVER() AS [totalCnt]
+      CAST(CASE WHEN a.id IS NULL THEN 0 ELSE 1 END AS BIT) AS [isAssigned]
     FROM bas_goods g
     LEFT JOIN whs_keeper_material_assignment a
       ON a.goods_no = g.goods_no AND a.ended_at IS NULL
@@ -180,47 +176,15 @@ class MaterialModel {
         OR g.goods_no LIKE ?
         OR g.goods_name LIKE ?
       )
-    ORDER BY g.goods_no
-    OFFSET ? ROWS FETCH NEXT ? ROWS ONLY
-  `;
-    const params = [
-      searchPattern,
-      searchPattern,
-      searchPattern,
-      offset,
-      opts.pageSize,
-    ];
-    guardParams(params);
-    const { rows } = await db.query(toDialect(sql), params);
-    if (rows.length === 0 && opts.page > 1) {
-      const countSql = `
-    -- DECLARE @searchPattern NVARCHAR(200) = N'%thep%'; -- NULL = khong loc
-    SELECT COUNT(*) AS [total]
-    FROM bas_goods g
-    WHERE ${ELIGIBLE_NPL_SQL}
-      AND (
-        CAST(? AS NVARCHAR(200)) IS NULL
-        OR g.goods_no LIKE ?
-        OR g.goods_name LIKE ?
-      )
-  `;
-      const countParams = [searchPattern, searchPattern, searchPattern];
-      guardParams(countParams);
-      const counted = await db.query(toDialect(countSql), countParams);
-      return {
-        rows: [],
-        total: Number(counted.rows[0] ? counted.rows[0].total : 0),
-      };
-    }
-    const cleanRows = rows.map((row) => {
-      const copy = { ...row };
-      delete copy.totalCnt;
-      return copy;
+    `;
+    const result = await pagination({
+      query: toDialect(sql),
+      params: [searchPattern, searchPattern, searchPattern],
+      orderBy: toDialect('[goodsNo]'),
+      page: opts.page,
+      pageSize: opts.pageSize,
     });
-    return {
-      rows: cleanRows,
-      total: rows.length > 0 ? Number(rows[0].totalCnt) : 0,
-    };
+    return { rows: result.data, total: result.pagination.totalItems };
   }
 
   /**

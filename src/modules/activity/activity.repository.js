@@ -33,6 +33,7 @@ const { ACCOUNT_AUDIT_ACTIONS } = require('../../config/account-audit');
  */
 
 const db = require('../../config/db');
+const pagination = require('../../util/pagination');
 const { TABLES } = require('../../config/tables');
 
 // ============== PRIVATE: HỖ TRỢ DIALECT + GUARD THAM SỐ ==============
@@ -337,15 +338,10 @@ class ActivityModel {
     const kw = String(opts.keyword || '').trim();
     const keywordPattern = kw ? `%${kw}%` : null;
     const actionKey = String(opts.actionKey || '').trim() || null;
-    const offset = (opts.page - 1) * opts.pageSize;
     const actionKeys = opts.actionKeys ?? ACCOUNT_AUDIT_ACTIONS;
     const actionFilter = `AND a.action_key ${opts.actionKeys ? 'IN' : 'NOT IN'}
       (${actionKeys.map(() => '?').join(', ')})`;
     const sql = `
-    -- DECLARE @keywordPattern NVARCHAR(100) = NULL;
-    -- DECLARE @actionKey NVARCHAR(40) = NULL;
-    -- DECLARE @offset INT = 0;
-    -- DECLARE @pageSize INT = 20;
     SELECT
       a.id AS [id],
       a.acted_at AS [time],
@@ -375,63 +371,15 @@ class ActivityModel {
       OR a.action_key = ?
     )
     ${actionFilter}
-    ORDER BY a.acted_at DESC, a.id DESC
-    OFFSET ? ROWS FETCH NEXT ? ROWS ONLY
-  `;
-    const params = [
-      keywordPattern,
-      keywordPattern,
-      keywordPattern,
-      keywordPattern,
-      keywordPattern,
-      keywordPattern,
-      keywordPattern,
-      actionKey,
-      actionKey,
-      ...actionKeys,
-      offset,
-      opts.pageSize,
-    ];
-    guardParams(params);
-    const { rows } = await db.query(toDialect(sql), params);
-    const countSql = `
-    -- DECLARE @keywordPattern NVARCHAR(100) = NULL;
-    -- DECLARE @actionKey NVARCHAR(40) = NULL;
-    SELECT COUNT(*) AS [total]
-    FROM whs_activity a
-    WHERE (
-      CAST(? AS NVARCHAR(100)) IS NULL
-      OR a.po_number LIKE ?
-      OR a.user_name LIKE ?
-      OR a.emp_no LIKE ?
-      OR a.slot_code LIKE ?
-      OR a.detail LIKE ?
-      OR a.action_key LIKE ?
-    )
-    AND (
-      CAST(? AS NVARCHAR(40)) IS NULL
-      OR a.action_key = ?
-    )
-    ${actionFilter}
-  `;
-    const countParams = [
-      keywordPattern,
-      keywordPattern,
-      keywordPattern,
-      keywordPattern,
-      keywordPattern,
-      keywordPattern,
-      keywordPattern,
-      actionKey,
-      actionKey,
-      ...actionKeys,
-    ];
-    guardParams(countParams);
-    const counted = await db.query(toDialect(countSql), countParams);
-    return {
-      rows, // SQL đã alias đầy đủ camelCase
-      total: Number(counted.rows[0] ? counted.rows[0].total : 0),
-    };
+    `;
+    const result = await pagination({
+      query: toDialect(sql),
+      params: [keywordPattern, keywordPattern, keywordPattern, keywordPattern, keywordPattern, keywordPattern, keywordPattern, actionKey, actionKey, ...actionKeys],
+      orderBy: toDialect('[time] DESC, [id] DESC'),
+      page: opts.page,
+      pageSize: opts.pageSize,
+    });
+    return { rows: result.data, total: result.pagination.totalItems };
   }
 }
 
