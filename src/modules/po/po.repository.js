@@ -1,90 +1,6 @@
 // SQL cho danh sách PO, tra dòng PO và đối chiếu phiếu tạm nhập.
 const db = require('../../config/db');
 const pagination = require('../../util/pagination');
-const { TABLES } = require('../../config/tables');
-
-// ==================== PRIVATE: HỖ TRỢ DIALECT + GUARD ====================
-
-/** Dialect hiện tại có phải PostgreSQL (chỉ dùng cho sandbox test)? */
-function isPg() {
-  return db.getDialect() === 'pg';
-}
-
-/**
- * Tên bảng logic (viết trong SQL) -> tên thật (kèm tiền tố nếu có) — quy tắc
- * 6 của toDialect quét qua từng cặp để thay.
- */
-const TABLE_PAIRS = [
-  ['sys_userpass', TABLES.userPass],
-  ['bas_goods', TABLES.goods],
-  ['pur_order1', TABLES.order1],
-  ['pur_order2', TABLES.order2],
-  ['pur_notice1', TABLES.notice1],
-  ['pur_notice2', TABLES.notice2],
-  ['v_pur_notice_detail', TABLES.noticeDetailView],
-  ['pur_in1', TABLES.in1],
-  ['pur_in2', TABLES.in2],
-  ['whs_user_role', TABLES.userRole],
-  ['whs_slots', TABLES.slots],
-  ['whs_slot_allocation', TABLES.allocation],
-  ['whs_allocation_receipt', TABLES.receipt],
-  ['whs_slot_movement', TABLES.movement],
-  ['whs_activity', TABLES.activity],
-  ['whs_keeper_material_assignment', TABLES.keeperMaterialAssignment],
-];
-
-// Chuyển cú pháp SQL Server cho chế độ PostgreSQL.
-function toDialect(text) {
-  if (!isPg()) return text;
-  let out = text.replace(/\bCOUNT_BIG\s*\(/gi, 'COUNT(');
-  // 2. LIKE -> ILIKE — giữ hành vi case-insensitive như mssql collation.
-  out = out.replace(/\bLIKE\b/g, 'ILIKE');
-  // 3. NVARCHAR(n) -> VARCHAR(n); GETDATE()/SYSUTCDATETIME() -> NOW().
-  out = out.replace(/\bNVARCHAR\s*\(/gi, 'VARCHAR(');
-  out = out.replace(/\bGETDATE\s*\(\s*\)/gi, 'NOW()');
-  out = out.replace(/\bSYSUTCDATETIME\s*\(\s*\)/gi, 'NOW()');
-  // 4a. CAST(CASE WHEN ... THEN 1 ELSE 0 END AS BIT) -> CASE ... TRUE/FALSE.
-  out = out.replace(
-    /\bCAST\s*\(\s*CASE\b([\s\S]*?)\bEND\s+AS\s+BIT\s*\)/gi,
-    (_m, body) =>
-      `CASE${String(body)
-        .replace(/\bTHEN\s+1\b/gi, 'THEN TRUE')
-        .replace(/\bELSE\s+0\b/gi, 'ELSE FALSE')}END`
-  );
-  // 4b. CAST(1 AS BIT) / CAST(0 AS BIT) -> TRUE / FALSE (hằng boolean).
-  out = out.replace(/\bCAST\s*\(\s*([01])\s+AS\s+BIT\s*\)/gi, (_m, bit) =>
-    bit === '1' ? 'TRUE' : 'FALSE'
-  );
-  // 5. [aliasBracket] -> "alias" — pg bọc identifier bằng nháy kép.
-  out = out.replace(/\[([A-Za-z_][A-Za-z0-9_]*)\]/g, '"$1"');
-  // 5c. Hàm ngày SQL Server không có trong pg.
-  out = out.replace(
-    /DATEADD\s*\(\s*DAY\s*,\s*(\d+)\s*,\s*CONVERT\s*\(\s*DATE\s*,\s*([A-Za-z_][\w.]*)\s*\)\s*\)/gi,
-    (_m, n, col) => `(CAST(${col} AS DATE) + ${n} * INTERVAL '1 day')`
-  );
-  out = out.replace(
-    /DATEADD\s*\(\s*DAY\s*,\s*(\d+)\s*,\s*([A-Za-z_][\w.]*)\s*\)/gi,
-    (_m, n, col) => `(${col} + ${n} * INTERVAL '1 day')`
-  );
-  // Đồng hồ tạm nhập 24h (2026-10-28): DATEADD(HOUR, -n, GETDATE()) đã
-  // thành DATEADD(HOUR, -n, NOW()) sau rule 3 -> (NOW() - n * INTERVAL '1 hour').
-  out = out.replace(
-    /DATEADD\s*\(\s*HOUR\s*,\s*-(\d+)\s*,\s*NOW\s*\(\s*\)\s*\)/gi,
-    (_m, n) => `(NOW() - ${n} * INTERVAL '1 hour')`
-  );
-  out = out.replace(
-    /CONVERT\s*\(\s*DATE\s*,\s*([A-Za-z_][\w.]*)\s*\)/gi,
-    (_m, col) => `CAST(${col} AS DATE)`
-  );
-  out = out.replace(/\bDATETIME\b/g, 'TIMESTAMP');
-  // 6. Tiền tố bảng sandbox — thay tên logic bằng tên thật (kèm tiền tố).
-  for (const [logical, actual] of TABLE_PAIRS) {
-    if (logical === actual) continue;
-    out = out.replace(new RegExp(`\\b${logical}\\b`, 'g'), actual);
-  }
-  return out;
-}
-
 /**
  * Chặn sớm tham số undefined trước khi xuống driver — giữ hành vi guard
  * cũ (trước đây nằm trong exec/sql-params, đã loại bỏ theo yêu cầu user).
@@ -410,18 +326,18 @@ function poSearchKeywordParams({ prefixPattern, containsPattern }) {
 class PoModel {
   // GET /api/warehouse/incoming-pos (không phân trang).
   async list() {
-    const { rows } = await db.query(toDialect(`
+    const { rows } = await db.query(`
       ${INCOMING_PO_SELECT}
       ORDER BY o1.close_sw, o2.del_date, o2.id;
-    `));
+    `);
     return rows;
   }
 
   // GET /api/warehouse/incoming-pos — trang và tổng số dòng.
   async listPaged(page, pageSize) {
     const result = await pagination({
-      query: toDialect(INCOMING_PO_SELECT),
-      orderBy: toDialect('[eta], [id]'),
+      query: INCOMING_PO_SELECT,
+      orderBy: '[eta], [id]',
       page,
       pageSize,
     });
@@ -473,7 +389,7 @@ class PoModel {
   `;
     const params = ['Y', poId];
     guardParams(params);
-    const { rows } = await db.query(toDialect(sql), params);
+    const { rows } = await db.query(sql, params);
     return rows[0] || null;
   }
 
@@ -501,7 +417,7 @@ class PoModel {
   `;
     const params = [poId];
     guardParams(params);
-    const { rows } = await db.query(toDialect(sql), params);
+    const { rows } = await db.query(sql, params);
     return rows[0] || null;
   }
 
@@ -576,7 +492,7 @@ class PoModel {
       }
     }
     guardParams(params);
-    const { rows } = await db.query(toDialect(sql), params);
+    const { rows } = await db.query(sql, params);
     return rows;
   }
 
@@ -610,7 +526,7 @@ class PoModel {
   `;
     const params = poIds.slice();
     guardParams(params);
-    const { rows } = await db.query(toDialect(sql), params);
+    const { rows } = await db.query(sql, params);
     return rows;
   }
 
@@ -662,7 +578,7 @@ class PoModel {
   `;
     const params = poIds.slice();
     guardParams(params);
-    const { rows } = await db.query(toDialect(sql), params);
+    const { rows } = await db.query(sql, params);
     return rows;
   }
 
@@ -706,7 +622,7 @@ class PoModel {
   `;
     const params = [poId];
     guardParams(params);
-    const { rows } = await db.query(toDialect(sql), params);
+    const { rows } = await db.query(sql, params);
     return rows;
   }
 
@@ -724,7 +640,7 @@ class PoModel {
   `;
     const params = [poId];
     guardParams(params);
-    const { rows } = await db.query(toDialect(sql), params);
+    const { rows } = await db.query(sql, params);
     return Number(rows[0] ? rows[0].total : 0);
   }
 
@@ -733,7 +649,7 @@ class PoModel {
     const sp = searchParams(opts);
     const filterParams = [...poCandidateParams(sp), ...poSearchKeywordParams(sp)];
     const result = await pagination({
-      query: toDialect(`
+      query: `
     SELECT
       u.id AS [id],
       CAST(u.po_id AS VARCHAR(20)) AS [poLine],
@@ -755,13 +671,13 @@ class PoModel {
       u.lot_sort AS [lotSort]
     FROM eligible u
     WHERE ${PO_SEARCH_KEYWORD_SQL}
-      `),
-      withSql: toDialect(PO_SEARCH_ELIGIBLE_SQL),
+      `,
+      withSql: PO_SEARCH_ELIGIBLE_SQL,
       distinctBy: 'poNumber',
       params: filterParams,
       page: opts.page,
       pageSize: opts.pageSize,
-      orderBy: toDialect('[eta], [poSort], [lotSort]'),
+      orderBy: '[eta], [poSort], [lotSort]',
     });
     return { rows: result.data, total: result.pagination.totalItems, poTotal: result.pagination.totalDistinct };
   }
@@ -804,7 +720,7 @@ class PoModel {
       sp.next3End, sp.next7End,
       ...poSearchKeywordParams(sp),
     ];
-    const { rows } = await db.query(toDialect(sqlBuckets), params);
+    const { rows } = await db.query(sqlBuckets, params);
     return rows;
   }
 

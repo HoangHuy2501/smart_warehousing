@@ -1,6 +1,7 @@
 'use strict';
 
 // Nạp trước app để chỉ tiến trình kiểm thử dùng PostgreSQL.
+const toPostgresSql = require('./translate-sql');
 const { Pool } = require('pg');
 const db = require('../../src/config/db');
 const { buildTestPostgresConfig } = require('./db.test.config');
@@ -9,7 +10,7 @@ const pool = new Pool(buildTestPostgresConfig().pool);
 
 async function queryWith(client, text, params = []) {
   let index = 0;
-  const statement = text.replace(/\?/g, () => '$' + (++index));
+  const statement = toPostgresSql(text).replace(/\?/g, () => '$' + (++index));
   const { rows } = await client.query(statement, params);
   return { rows };
 }
