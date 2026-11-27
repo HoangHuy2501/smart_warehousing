@@ -18,16 +18,12 @@ function guardParams(params) {
 function searchParams(opts) {
   const kw = String(opts.keyword || '').trim();
   return {
-    bucket: opts.bucket ?? null,
     // 5 mốc bucket mới (2026-10-20) — date-only YYYY-MM-DD từ service
     today: opts.today ?? null,
     prevMonthStart: opts.prevMonthStart ?? null,
     twoMonthsAgoStart: opts.twoMonthsAgoStart ?? null,
     next3End: opts.next3End ?? null,
     next7End: opts.next7End ?? null,
-    // Keeper NPL permission — TỪ SESSION, không bao giờ nhận từ client;
-    // manager => null (không lọc)
-    keeperEmpNo: opts.keeperEmpNo ?? null,
     prefixPattern: kw ? `${kw}%` : null,
     containsPattern: kw ? `%${kw}%` : null,
   };
@@ -337,135 +333,72 @@ class PoModel {
   // GET /api/warehouse/pos — SQL chung cho danh sách và số đếm.
   purchaseQuery(opts) {
     const sp = searchParams(opts);
-    const query = `
+    const source = `
     SELECT
+      o1.close_sw, o1.rem, n.sheet_no, n.adj_result, o1.check_date as po_date,
+      o.sheet_no as po_no, o.sheet_id as po_id, o.goods_no as mat_no,
+      g.goods_name as mat_name, gt.goods_type as mat_type, gt.goods_type_desc as mat_type_desc,
+      o.sheet_qty as po_qty, n.sheet_qty as temp_rcv_qty, n.sheet_qty1 as temp_foc_qty,
+      n1.sheet_date as temp_rcv_date, o.del_date as su_reply_date,
+      datediff(day, o.del_date, getdate()) as late_date,
+      n.return_qty as fail_qty, n.return_qty1 as fail_foc_qty,
+      n.return_qty + n.return_qty1 as total_fail_qty,
+      case when n.sheet_qty > 0 then (n.return_qty/ n.sheet_qty) * 100 else 0 end as r_fail_qty,
+      case when n.sheet_qty1 > 0 then (n.return_qty/ n.sheet_qty1) * 100 else 0 end as r_fail_foc_qty,
+      case when (n.sheet_qty + n.sheet_qty) > 0 then ((n.return_qty + n.return_qty1)/ (n.sheet_qty + n.sheet_qty1)) * 100 else 0 end as r_total_fail_qty,
+      case when i.sheet_no is not null and i.sheet_sta = 1 then N'Da nhap ho chinh thuc'
+           when i.sheet_no is not null and i.sheet_sta <> 1 then N'Da gui yeu cau nhap kho chinh thuc'
+           when n.sheet_no is not null and n.sheet_sta1 = 1 then 'Da kiem IQC'
+           when n.sheet_no is not null and n.sheet_sta1 <> 1 then 'Dang doi kiem IQC'
+           when n.sheet_no is null then 'Hang chua ve nha may'
+           when datediff(day, o.del_date, getdate()) > 0 then 'Lo hang tre hen'
+           when datediff(day, o.del_date, getdate()) between -3 and -1 then 'Lo hang du kien sap ve'
+           when datediff(day, o.del_date, getdate()) = 0 then 'Lo hang du kien ve hom nay'
+           else 'Lo hang chua giao' end as status_po,
       CASE WHEN n.id IS NULL THEN CAST(o.id AS VARCHAR(40)) ELSE CONCAT(o.id, '-N', n.id) END AS [id],
       CAST(o.id AS VARCHAR(20)) AS [poLine],
       o.sheet_no AS [poNumber],
       o.goods_no AS [itemCode],
       g.goods_name AS [material],
       o1.su_name11 AS [supplier],
-      CAST(COALESCE(n.sheet_qty, o.sheet_qty - COALESCE(allocation.assigned_qty, 0)) AS FLOAT) AS [qty],
+      CAST(COALESCE(n.sheet_qty, o.sheet_qty - COALESCE((SELECT SUM(a.allocated_qty) FROM whs_slot_allocation AS a WHERE a.po_id = o.id), 0)) AS FLOAT) AS [qty],
       CAST(o.sheet_qty AS FLOAT) AS [sheetQty],
       COALESCE(n.unit_no, o.unit_no) AS [unit],
       CAST(o.sheet_pri AS FLOAT) AS [unitPrice],
       CAST(CASE WHEN o1.check_sta = 'Y' THEN 1 ELSE 0 END AS BIT) AS [confirmed],
       o.del_date AS [eta],
-      CAST(CASE WHEN (n.id IS NOT NULL OR receipt.grn_ref IS NOT NULL) THEN 1 ELSE 0 END AS BIT) AS [arrived],
-      receipt.grn_ref AS [grnRef],
+      CAST(CASE WHEN (n.id IS NOT NULL OR i.sheet_no IS NOT NULL) THEN 1 ELSE 0 END AS BIT) AS [arrived],
+      i.sheet_no AS [grnRef],
       n.made_lot AS [lotNo],
-      CAST(COALESCE(allocation.assigned_qty, 0) AS FLOAT) AS [assignedQty],
+      CAST(COALESCE((SELECT SUM(a.allocated_qty) FROM whs_slot_allocation AS a WHERE a.po_id = o.id), 0) AS FLOAT) AS [assignedQty],
       o.id AS [poSort],
-      COALESCE(n.id, 0) AS [lotSort],
-      o1.check_date AS [po_date],
-      o.sheet_no AS [po_no],
-      o.sheet_id AS [po_id],
-      o.goods_no AS [mat_no],
-      g.goods_name AS [mat_name],
-      CAST(o.sheet_qty AS FLOAT) AS [po_qty],
-      CAST(n.sheet_qty AS FLOAT) AS [temp_rcv_qty],
-      CAST(n.sheet_qty1 AS FLOAT) AS [temp_foc_qty],
-      n1.sheet_date AS [temp_rcv_date],
-      o.del_date AS [su_reply_date],
-      CASE WHEN receipt.approved = 1 THEN NULL ELSE eta.days_late END AS [late_date],
-      CAST(n.return_qty AS FLOAT) AS [fail_qty],
-      CAST(n.return_qty1 AS FLOAT) AS [fail_foc_qty],
-      CAST(failure.total_qty AS FLOAT) AS [total_fail_qty],
-      CAST(n.return_qty * 100.0 / NULLIF(n.sheet_qty, 0) AS FLOAT) AS [r_fail_qty],
-      CAST(n.return_qty1 * 100.0 / NULLIF(n.sheet_qty1, 0) AS FLOAT) AS [r_fail_foc_qty],
-      CAST(failure.total_qty * 100.0 / NULLIF(
-        COALESCE(n.sheet_qty, 0) + COALESCE(n.sheet_qty1, 0), 0
-      ) AS FLOAT) AS [r_total_fail_qty],
-      CASE
-        WHEN receipt.approved = 1 THEN N'IN_STOCK'
-        WHEN receipt.approved = 0 THEN N'SEND_STOCK'
-        WHEN n.sheet_sta1 = '1' and (v.adj_result = '1' or v.adj_result = '3')  THEN N'WAITING_STOCK'
-        WHEN n.sheet_sta1 = '1' and v.adj_result = '2'  THEN N'RETURNED'
-        WHEN n.id IS NOT NULL THEN N'WAITING_IQC'
-        WHEN eta.days_late > 0 THEN N'Lô hàng trễ hẹn'
-        WHEN eta.days_late BETWEEN -3 AND -1 THEN N'Lô hàng dự kiến sắp về'
-        WHEN eta.days_late = 0 THEN N'Lô hàng dự kiến về hôm nay'
-        ELSE N'Lô hàng chưa giao'
-      END AS [status_po]
-    FROM pur_order2 o
-    JOIN pur_order1 o1 ON o1.sheet_no = o.sheet_no
-    JOIN bas_goods g ON g.goods_no = o.goods_no
-    JOIN sys_userpass u ON u.user_no = o1.create_user AND u.user_name <> 'ADM'
-    LEFT JOIN pur_notice2 n ON n.pur_no = o.sheet_no
-      AND n.pur_id = o.sheet_id
-      AND n.goods_no = o.goods_no
-      AND (n.def02 = o.def02 OR (n.def02 IS NULL AND o.def02 IS NULL))
-    LEFT JOIN pur_notice1 n1 ON n1.sheet_no = n.sheet_no
-    LEFT join v_pur_notice_detail v on v.sheet_no = n.sheet_no and v.made_lot=n.made_lot
-    OUTER APPLY (
-      -- Một dòng tạm nhập có thể có nhiều phiếu nhập.
-      SELECT MAX(i.sheet_no) AS grn_ref,
-        MAX(CASE WHEN i1.sheet_sta = '1' THEN 1 ELSE 0 END) AS approved
-      FROM pur_in2 i
-      JOIN pur_in1 i1 ON i1.sheet_no = i.sheet_no
-      WHERE i.pur_no = o.sheet_no AND i.pur_id = o.sheet_id
-        AND i.goods_no = o.goods_no
-        AND (n.id IS NULL OR (i.notice_no = n.sheet_no AND i.notice_id = n.sheet_id))
-    ) receipt
-    OUTER APPLY (
-      SELECT SUM(a.allocated_qty) AS assigned_qty
-      FROM whs_slot_allocation a
-      WHERE a.po_id = o.id
-    ) allocation
-    CROSS APPLY (
-      SELECT DATEDIFF(DAY, o.del_date, GETDATE()) AS days_late
-    ) eta
-    CROSS APPLY (
-      SELECT CASE WHEN n.return_qty IS NULL AND n.return_qty1 IS NULL THEN NULL
-                  ELSE COALESCE(n.return_qty, 0) + COALESCE(n.return_qty1, 0) END AS total_qty
-    ) failure
-    WHERE o1.close_sw IN ('N', '0')
-      AND o1.sheet_sta <> '0'
-      AND (
-        o.goods_no LIKE 'M1%' OR o.goods_no LIKE 'M2%'
-        OR o.goods_no LIKE 'M3%' OR o.goods_no LIKE 'M4%'
-        OR o.goods_no LIKE 'M5%' OR o.goods_no LIKE 'M6%'
-        OR o.goods_no LIKE 'A2%'
-      )
-      AND (
-        CAST(? AS NVARCHAR(20)) IS NULL
-        OR EXISTS (
-          SELECT 1 FROM whs_keeper_material_assignment ma
-          WHERE ma.keeper_emp_no = ?
-            AND ma.goods_no = o.goods_no
-            AND ma.ended_at IS NULL
-        )
-      )
-      AND NOT EXISTS (
-          SELECT 1
-          FROM whs_slot_allocation a
-          WHERE a.po_id = o.id
-            AND a.goods_no = o.goods_no
-      )
-      AND (
-        CAST(? AS NVARCHAR(10)) IS NULL
-        OR (? = 'overdue' AND (o.del_date IS NULL OR o.del_date < ?))
-        OR (? = 'od3p' AND (o.del_date IS NULL OR o.del_date < ?))
-        OR (? = 'od2' AND o.del_date >= ? AND o.del_date < ?)
-        OR (? = 'od1' AND o.del_date >= ? AND o.del_date < ?)
-        OR (? = 'next3' AND o.del_date >= ? AND o.del_date < ?)
-        OR (? = 'next7' AND o.del_date >= ? AND o.del_date < ?)
-      )
-      AND (
+      COALESCE(n.id, 0) AS [lotSort]
+    from pur_order2 o with (nolock)
+    inner join pur_order1 o1 with(nolock) on o.sheet_no = o1.sheet_no
+    inner join bas_goods g with(nolock) on g.goods_no = o.goods_no
+    inner join bas_goods_type gt with(nolock) on gt.goods_type = g.goods_type
+    left join pur_notice2 n with(nolock) on n.pur_no = o.sheet_no and n.pur_id = o.sheet_id
+    left join pur_notice1 n1 with(nolock) on n1.sheet_no = n.sheet_no
+    left join pur_in2 i with(nolock) on i.notice_no = n.sheet_no and i.notice_id = n.sheet_id
+    left join pur_in1 i1 with(nolock) on i.sheet_no = i1.sheet_no
+    where i.sheet_no is null and o.close_sw = 0 and o1.sheet_date > '2026-01-01'
+      and o.sheet_sta = 1 and (n.adj_result <> 2 or n.adj_result is null)
+      and o1.close_sw = 0
+      and (datediff(day, o.del_date, getdate()) > -30 and datediff(day, o.del_date, getdate()) < 30)
+    `;
+    // Tìm theo từ khóa trên tập PO đủ điều kiện cố định.
+    const query = `
+    SELECT p.* FROM (${source}) AS p
+    WHERE (
         CAST(? AS NVARCHAR(140)) IS NULL
-        OR o1.sheet_no LIKE ?
-        OR o.goods_no LIKE ?
-        OR n.made_lot LIKE ?
-        OR g.goods_name LIKE ?
-        OR o1.su_name11 LIKE ?
+        OR p.[poNumber] LIKE ?
+        OR p.[itemCode] LIKE ?
+        OR p.[lotNo] LIKE ?
+        OR p.[material] LIKE ?
+        OR p.[supplier] LIKE ?
       )
     `;
     const params = [
-      sp.keeperEmpNo, sp.keeperEmpNo,
-      sp.bucket, sp.bucket, sp.today, sp.bucket, sp.twoMonthsAgoStart,
-      sp.bucket, sp.twoMonthsAgoStart, sp.prevMonthStart,
-      sp.bucket, sp.prevMonthStart, sp.today,
-      sp.bucket, sp.today, sp.next3End, sp.bucket, sp.next3End, sp.next7End,
       sp.prefixPattern, sp.prefixPattern, sp.prefixPattern, sp.prefixPattern,
       sp.containsPattern, sp.containsPattern,
     ];
@@ -487,11 +420,11 @@ class PoModel {
 
   /**
    * GET /api/warehouse/pos?counts=1 — đếm mã PO duy nhất theo từng nhóm ETA.
-   * Giữ bộ lọc từ khóa và quyền thủ kho để đếm các tab trong cùng request.
+   * Giữ bộ lọc từ khóa khi đếm theo nhóm ngày dự kiến.
    */
   async countPurchaseBuckets(opts) {
-    const sp = searchParams({ ...opts, bucket: null });
-    const source = this.purchaseQuery({ ...opts, bucket: null });
+    const sp = searchParams(opts);
+    const source = this.purchaseQuery(opts);
     const sqlBuckets = `
       WITH bucketed AS (
         SELECT p.[poNumber] AS po_number,

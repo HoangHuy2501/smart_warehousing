@@ -45,7 +45,6 @@ const SlotRepository = require('../slots/slot.repository');
 const ActivityRepository = require('../activity/activity.repository');
 
 /** Bucket hợp lệ của query /pos — giá trị khác → coi như không truyền. */
-const VALID_BUCKETS = ['overdue', 'od1', 'od2', 'od3p', 'next3', 'next7'];
 
 /** page >= 1; chuỗi rỗng / sai định dạng / NaN → 1. */
 function parsePage(value) {
@@ -63,18 +62,14 @@ function parsePageSize(value, fallback) {
 class SearchServices {
   /**
    * GET /pos — phân trang PO mở + đếm số đơn theo bucket ETA.
-   * bucketCounts lọc theo keyword nhưng KHÔNG lọc bucket (FE làm tab).
+   * bucketCounts thống kê theo ngày dự kiến trên tập kết quả tìm kiếm.
    * Danh sách và các số đếm chạy đồng thời.
    *
-   * @param {object} query - { keyword?, bucket?, page?, pageSize?, counts? }
-   * @param {object} actor - Session người gọi (KEEPER bị scope NPL active)
+   * @param {object} query - { keyword?, page?, pageSize?, counts? }
    * @returns {Promise<object>} { items, total, page, pageSize, bucketCounts? }
    */
-  async searchPos(query, actor) {
+  async searchPos(query) {
     const kw = String(query.keyword ?? '').trim();
-    const bucket = VALID_BUCKETS.includes(query.bucket)
-      ? query.bucket
-      : null;
     const page = parsePage(query.page);
     const pageSize = parsePageSize(query.pageSize, 15);
     const wantCounts = String(query.counts ?? '1') !== '0';
@@ -82,11 +77,7 @@ class SearchServices {
     const ranges = computeBucketDates();
     const base = {
       keyword: kw,
-      bucket,
       ...ranges,
-      // KEEPER chỉ thấy NPL được phân công — empNo lấy từ SESSION,
-      // không nhận từ query (chống vượt quyền).
-      keeperEmpNo: actor && actor.role === 'KEEPER' ? actor.empNo : null,
       page,
       pageSize,
     };
