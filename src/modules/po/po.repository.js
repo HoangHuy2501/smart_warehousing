@@ -436,7 +436,12 @@ class PoModel {
             AND ma.ended_at IS NULL
         )
       )
-
+      AND NOT EXISTS (
+          SELECT 1
+          FROM whs_slot_allocation a
+          WHERE a.po_id = o.id
+            AND a.goods_no = o.goods_no
+      )
       AND (
         CAST(? AS NVARCHAR(10)) IS NULL
         OR (? = 'overdue' AND (o.del_date IS NULL OR o.del_date < ?))
