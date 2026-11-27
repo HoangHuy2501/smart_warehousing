@@ -13,19 +13,23 @@ const t8 = require('./t8-receipt.repository');
 const EPSILON = 0.000000005;
 const QUANTITY_SCALE = 100000000n;
 
+// Đổi số lượng sang số nguyên theo độ chính xác 8 chữ số thập phân.
 function quantityUnits(value) {
     const [whole, fraction = ''] = String(value).split('.');
     return BigInt(whole) * QUANTITY_SCALE + BigInt(fraction.padEnd(8, '0'));
 }
 
+// Định dạng số lượng để trả về API hoặc ghi vào T8.
 function formatQuantity(units) {
     return String(units / QUANTITY_SCALE) + '.' + String(units % QUANTITY_SCALE).padStart(8, '0');
 }
 
+// Cộng số lượng của các dòng dự kiến ghi vào T8.
 function totalUnits(lines) {
     return lines.reduce((sum, line) => sum + quantityUnits(line.values.sheet_qty), 0n);
 }
 
+// Kiểm tra phân bổ còn ở kệ yêu cầu và người dùng có quyền thao tác.
 async function authorize(allocationId, actor, slotCode, tx) {
     const allocation = await locks.findAllocationForSync(allocationId, tx);
     if (!allocation || allocation.closedAt) err('not_found', 404);
@@ -35,12 +39,14 @@ async function authorize(allocationId, actor, slotCode, tx) {
     return { ...allocation, warehouse: slot.warehouse };
 }
 
+// Lấy người thao tác và kiểm tra chế độ gửi phiếu T8.
 async function getActor(actorId, slotCode) {
     if (typeof slotCode !== 'string' || !slotCode.trim() || slotCode.length > 20) err('slot_code_invalid');
     if (db.getMode() !== 'sqlserver') err('t8_receipt_unavailable', 503);
     return shared.getActor(actorId);
 }
 
+// Lấy các phân bổ cùng lô và khóa nhóm khi xác nhận.
 async function getGroup(allocationId, actor, slotCode, tx, lockGroup) {
     let anchor = await authorize(allocationId, actor, slotCode, tx);
     if (anchor.status !== 'WAITING_STOCK') return { anchor, members: [] };
@@ -75,6 +81,7 @@ async function getGroup(allocationId, actor, slotCode, tx, lockGroup) {
     return { anchor, members, lotNo: [...lots][0] };
 }
 
+// Lập các dòng cần ghi, bỏ qua dòng đã có phiếu nhập khớp trên T8.
 async function planLines(members, tx, lockNotices) {
     const noticeIds = [...new Set(members.flatMap((member) =>
         member.included.map((r) => Number(r.noticeDetailId))))].sort((a, b) => a - b);
@@ -101,17 +108,12 @@ async function planLines(members, tx, lockNotices) {
                 local.some((r) => r.lotNo.trim() !== row.lot_no?.trim())) err('lot_stock_unresolved', 409);
 
             const required = Number(row.required_qty);
-            const imported = Number(row.imported_qty);
-            const source = await t8.findSource(id, allocation.poId, allocation.goodsNo,
-                slotCode, allocation.warehouse, warehouse, tx);
+            const source = await t8.findSource(id, allocation.poId, allocation.goodsNo, tx);
             if (!source) err('t8_receipt_source_invalid', 409);
-            if (imported >= required) continue;
-            const existing = imported + Number(source.draft_qty);
-            if (existing + EPSILON >= required) continue;
+            if (Number(source.receipt_count) > 0) continue;
 
             const localQty = local.reduce((sum, r) => sum + Number(r.qtyInStock), 0);
-            const slotQty = Number(source.slot_qty ?? 0);
-            const quantity = Math.min(required - existing - (plannedByNotice.get(id) || 0), localQty - slotQty);
+            const quantity = Math.min(required - (plannedByNotice.get(id) || 0), localQty);
             if (quantity <= EPSILON) continue;
 
             const acceptedByIqc = Number(source.sheet_qty) - Number(source.return_qty);
@@ -132,7 +134,7 @@ async function planLines(members, tx, lockNotices) {
                 cur_no: source.cur_no, inv_type: source.inv_type, rem: source.rem,
                 def06: source.sheet_qty, def14: source.def14, def15: source.def15, sheet_sta: '0',
             };
-            planned.push({ allocationId, id, slotCode, warehouseCode: allocation.warehouse, supplier: source.su_no, values, existing, slotQty });
+            planned.push({ allocationId, id, slotCode, warehouseCode: allocation.warehouse, supplier: source.su_no, values });
             plannedByNotice.set(id, (plannedByNotice.get(id) || 0) + quantity);
         }
     }
@@ -142,10 +144,12 @@ async function planLines(members, tx, lockNotices) {
     return planned;
 }
 
+// Tạo mã đối chiếu giữa bản xem trước và lúc xác nhận.
 function revision(allocationId, slotCode, members, lines) {
     return createHash('sha256').update(JSON.stringify([allocationId, slotCode, members, lines])).digest('hex');
 }
 
+// Trả thông tin xem trước cho form Gửi đơn T8.
 async function preview(allocationId, { actorId, slotCode }) {
     const actor = await getActor(actorId, slotCode);
     const { anchor: allocation, members, lotNo } = await getGroup(allocationId, actor, slotCode, db.query, false);
@@ -172,6 +176,7 @@ async function preview(allocationId, { actorId, slotCode }) {
     };
 }
 
+// Kiểm tra lại trước khi ghi phiếu và cập nhật trạng thái phân bổ.
 async function send(allocationId, { actorId, slotCode, revision: expectedRevision, totalQuantity }) {
     const actor = await getActor(actorId, slotCode);
     if (typeof expectedRevision !== 'string') err('t8_receipt_preview_required');

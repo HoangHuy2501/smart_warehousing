@@ -4,6 +4,7 @@ const { TABLES: t } = require('../../config/tables');
 const audit = require('../../util/sql-audit');
 const operationLog = require('../t8/t8-operation-log.repository');
 
+// Tìm các phân bổ cùng PO và mã NPL đang chờ nhập kho.
 async function findWaitingPeers(anchorId, query) {
     const { rows } = await query(`
         SELECT DISTINCT a.id
@@ -20,20 +21,21 @@ async function findWaitingPeers(anchorId, query) {
     return rows.map((row) => row.id);
 }
 
+// Bỏ tiền tố kho để tra mã vị trí rút gọn trên T8.
 function withoutWarehousePrefix(slotCode, warehouseCode) {
     const prefix = warehouseCode + '-';
     return slotCode.startsWith(prefix) ? slotCode.slice(prefix.length) : slotCode;
 }
 
-async function findSource(noticeId, poId, goodsNo, slotCode, warehouseCode, warehouse, query) {
+// Đọc dữ liệu tạm nhập, kết quả IQC và dấu hiệu đã có phiếu nhập.
+async function findSource(noticeId, poId, goodsNo, query) {
     const { rows } = await query(`
         SELECT n.sheet_no AS notice_no, n.sheet_id AS notice_id,
                n.pur_no, n.pur_id, n.goods_no, n.unit_no, n.unit_rate,
                n.made_lot, n.sheet_pri, n.pri_dis, n.tax_sw, n.cur_no, n.inv_type,
                n.rem, n.def02 AS def14, n.def12 AS def15, h.su_no,
                iqc.match_count, iqc.adj_result, iqc.sheet_qty, iqc.return_qty,
-               COALESCE(existing.draft_qty, 0) AS draft_qty,
-               COALESCE(existing.slot_qty, 0) AS slot_qty
+               existing.receipt_count
         FROM ${t.notice2} n
         JOIN ${t.notice1} h ON h.sheet_no = n.sheet_no
         JOIN ${t.order2} po ON po.id = ? AND po.sheet_no = n.pur_no
@@ -47,24 +49,20 @@ async function findSource(noticeId, poId, goodsNo, slotCode, warehouseCode, ware
               AND i.goods_no = n.goods_no AND i.made_lot = n.made_lot
         ) iqc
         CROSS APPLY (
-            SELECT SUM(CASE WHEN p.sheet_sta = '0' THEN d.sheet_qty ELSE 0 END) AS draft_qty,
-                   SUM(CASE WHEN d.st_bit_no IN (?, ?) AND d.st_no = ? THEN d.sheet_qty ELSE 0 END) AS slot_qty
+            SELECT COUNT_BIG(*) AS receipt_count
             FROM ${t.in2} d
             JOIN ${t.in1} p ON p.sheet_no = d.sheet_no
             WHERE d.notice_no = n.sheet_no AND d.notice_id = n.sheet_id
               AND d.pur_no = n.pur_no AND d.pur_id = n.pur_id
               AND d.goods_no = n.goods_no AND d.made_lot = n.made_lot
               AND d.unit_no = n.unit_no
-              AND EXISTS (
-                  SELECT 1 FROM ${t.userPass} u
-                  WHERE u.user_no = p.create_user AND u.user_name <> 'ADM'
-              )
         ) existing
         WHERE n.id = ? AND n.goods_no = ?
-    `, [poId, slotCode, withoutWarehousePrefix(slotCode, warehouseCode), warehouse, noticeId, goodsNo]);
+    `, [poId, noticeId, goodsNo]);
     return rows[0];
 }
 
+// Tra tài khoản T8 và mã nhân viên để ghi đầu phiếu.
 async function findCreator(empNo, query) {
     const { rows } = await query(`
         SELECT u.user_no, e.emp_no
@@ -75,6 +73,7 @@ async function findCreator(empNo, query) {
     return rows[0];
 }
 
+// Tra mã vị trí T8 đang hoạt động trong kho đích.
 async function findActiveSlotCode(warehouse, slotCode, warehouseCode, query) {
     const shortCode = withoutWarehousePrefix(slotCode, warehouseCode);
     const { rows } = await query(`
@@ -87,6 +86,7 @@ async function findActiveSlotCode(warehouse, slotCode, warehouseCode, query) {
     return rows[0]?.st_bit_no?.trim();
 }
 
+// Tìm phiếu nháp cùng mã tạm nhập và nhà cung cấp.
 async function findOpenDraft(noticeNo, supplier, query) {
     const { rows } = await query(`
         SELECT TOP (2) h.sheet_no
@@ -105,6 +105,7 @@ async function findOpenDraft(noticeNo, supplier, query) {
     return rows.map((row) => row.sheet_no);
 }
 
+// Lấy số thứ tự tiếp theo trong phiếu nhập.
 async function nextLineId(sheetNo, query) {
     const { rows } = await query(`
         SELECT COALESCE(MAX(sheet_id), 0) + 1 AS next_id
@@ -114,6 +115,7 @@ async function nextLineId(sheetNo, query) {
     return rows[0].next_id;
 }
 
+// Giữ số phiếu PSMGI tiếp theo trong ngày.
 async function reserveSheetNumber(query) {
     const { rows } = await query(`
         DECLARE @prefix varchar(11) = 'PSMGI' + CONVERT(char(6), GETDATE(), 12);
