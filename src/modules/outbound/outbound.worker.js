@@ -15,11 +15,13 @@ const { vapidConfig } = require('./push-device.service');
 
 const logger = createWorkerLogger('outbound-worker');
 
+// Khởi động tiến trình xử lý job xuất kho.
 async function startWorker(name, pattern, processor) {
     await getWorkerQueue(name).upsertJobScheduler(name, { pattern }, { name: 'sweep', data: {} });
     createAppWorker({ workerName: name, queueName: name, processor, concurrency: 1 });
 }
 
+// Khởi động worker và đăng ký xử lý hàng đợi.
 async function main() {
     if (!process.env.OUTBOUND_SYNC_START_DATE) {
         logger.warn('outbound_disabled', { reason: 'OUTBOUND_SYNC_START_DATE is unset' });

@@ -4,6 +4,7 @@ const ngrok = require("@ngrok/ngrok");
 
 const PORT = Number(process.env.PORT || 3000);
 
+// Khởi động đường hầm đến server phát triển.
 async function startNgrok() {
     try {
         const token = process.env.NGROK_AUTHTOKEN;

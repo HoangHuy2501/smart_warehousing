@@ -7,6 +7,7 @@
 
 const { ApiError } = require('../util/api-error');
 
+// Tạo middleware kiểm tra các trường bắt buộc trong request.
 function requireBodyFields(fields) {
   return (req, res, next) => {
     const missing = fields.filter(

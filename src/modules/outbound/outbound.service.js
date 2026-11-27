@@ -8,15 +8,18 @@ const { err, shared } = require('../../shared/shared');
 
 const SCALE = 100000000n;
 
+// Chuẩn hóa số lượng để tính toán lượng xuất.
 function amount(value) {
     const [whole, fraction = ''] = String(value ?? 0).split('.');
     return BigInt(whole) * SCALE + BigInt(fraction.padEnd(8, '0'));
 }
 
+// Định dạng số thập phân để ghi số lượng.
 function decimal(value) {
     return `${value / SCALE}.${String(value % SCALE).padStart(8, '0')}`;
 }
 
+// Quy đổi số lượng xuất về đơn vị tồn kho.
 function stockQuantity(line) {
     const quantity = amount(line.requested_qty ?? line.qty);
     if (!line.stock_unit || line.stock_unit.trim() === line.unit_no?.trim()) return quantity;
@@ -27,6 +30,7 @@ function stockQuantity(line) {
     return rounded * (SCALE / 1000n);
 }
 
+// Xác định lượng thiếu khi so với yêu cầu xuất.
 function outboundShortage(line) {
     const remaining = stockQuantity(line) - amount(line.total_planned_qty);
     if (remaining <= 0n) return 0;
@@ -35,11 +39,13 @@ function outboundShortage(line) {
     return Number((remaining * rate / SCALE + 50000n) / 100000n) / 1000;
 }
 
+// So sánh dữ liệu nguồn để phát hiện thay đổi.
 function sameSource(source, line) {
     return source && ['sheet_no', 'goods_no', 'made_lot', 'unit_no'].every((key) =>
         source[key] === line[key]) && amount(source.requested_qty) === amount(line.qty);
 }
 
+// Kiểm tra hai vị trí thuộc cùng kệ.
 function sameShelf(pick, line) {
     return pick.allocation_status === 'IN_STOCK' && !pick.closed_at &&
         pick.current_slot === pick.slot_code && pick.current_goods === line.goods_no &&
@@ -47,6 +53,7 @@ function sameShelf(pick, line) {
         amount(pick.stock_qty) >= amount(pick.committed_qty);
 }
 
+// Sắp thứ tự ưu tiên các vị trí lấy hàng.
 function prioritizeShelves(candidates) {
     const shelves = new Map();
     for (const candidate of candidates) {
@@ -60,6 +67,7 @@ function prioritizeShelves(candidates) {
         .flatMap((shelf) => shelf.receipts);
 }
 
+// Lập danh sách vị trí và lượng cần lấy cho dòng xuất.
 async function plan(source) {
     return db.withTransaction(async (tx) => {
         await repo.lock(tx);
@@ -100,6 +108,7 @@ async function plan(source) {
     });
 }
 
+// Ghi nhật ký thao tác lấy hàng xuất kho.
 function logOutboundPick(line, pick, actionKey, userId, qty, actedAt, detail, tx) {
     const statements = actionKey === 'OUTBOUND_PICK_CONFIRMED' ? [
         audit.update('whs_slot_allocation', { qty_in_stock: detail.stockAfter }, { id: pick.allocation_id }),
@@ -139,6 +148,7 @@ function logOutboundPick(line, pick, actionKey, userId, qty, actedAt, detail, tx
     }, tx);
 }
 
+// Xác nhận lượt lấy hàng xuất kho.
 async function confirm(id, actor) {
     return db.withTransaction(async (tx) => {
         await repo.lock(tx);
@@ -177,6 +187,7 @@ async function confirm(id, actor) {
     });
 }
 
+// Dọn dòng đang chờ sau khi xác nhận đã bị xóa trên T8.
 async function removeDeletedWaitingLine(id) {
     return db.withTransaction(async (tx) => {
         await repo.lock(tx);
@@ -187,6 +198,7 @@ async function removeDeletedWaitingLine(id) {
     });
 }
 
+// Hoàn tất xử lý dòng xuất kho.
 async function complete(id) {
     return db.withTransaction(async (tx) => {
         await repo.lock(tx);
@@ -218,6 +230,7 @@ async function complete(id) {
     });
 }
 
+// Chuẩn bị dữ liệu thông báo xuất kho cho người dùng.
 async function notifications(actor, sheetNo) {
     const rows = await repo.listNotifications(actor, sheetNo);
     const sheets = new Map();

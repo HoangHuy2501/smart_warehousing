@@ -13,11 +13,13 @@ const WORKER_QUEUES = [
 const { ACCOUNT_AUDIT_ACTIONS } = require('../../config/account-audit');
 const QUEUE_TIMEOUT_MS = 2000;
 
+// Giới hạn thao tác cho tài khoản IT.
 async function requireIt(actorId) {
     const actor = await shared.getActor(actorId);
     if (actor.role !== 'IT' || !actor.active) err('no_permission', 403);
 }
 
+// Rút gọn thông tin job để hiển thị trên trang giám sát.
 function toJobSummary(job, failed = false) {
     if (!job) return null;
     const summary = { id: job.id, name: job.name, finishedAt: job.finishedOn ?? null, attempts: job.attemptsMade };
@@ -31,6 +33,7 @@ function toJobSummary(job, failed = false) {
     return summary;
 }
 
+// Đọc heartbeat và số job của một worker.
 async function readWorker(queueName, redis) {
     const queue = getProducerQueue(queueName);
     const [heartbeat, counts, completed, failed] = await Promise.all([
@@ -53,6 +56,7 @@ async function readWorker(queueName, redis) {
 
 let pendingRead;
 
+// Tổng hợp tình trạng các worker.
 function readWorkers() {
     if (pendingRead) return pendingRead;
     const redis = getProducerRedisConnection();
@@ -73,6 +77,7 @@ function readWorkers() {
     return response;
 }
 
+// Trả tình trạng các worker và hàng đợi kho.
 async function workers(actorId) {
     await requireIt(actorId);
     const items = await readWorkers();
@@ -82,6 +87,7 @@ async function workers(actorId) {
     };
 }
 
+// Trả nhật ký kiểm toán theo bộ lọc.
 async function audit(query, actorId) {
     await requireIt(actorId);
     const paging = parsePaging(query) ?? { page: 1, pageSize: 20 };

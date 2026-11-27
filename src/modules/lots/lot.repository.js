@@ -1372,9 +1372,11 @@ class LotModel {
   list() {
     return this.findLots();
   }
+  // Tra lô theo mã phân bổ.
   byId(id) {
     return this.findLotById(id);
   }
+  // Tra các phân bổ còn hiệu lực trên kệ.
   byShelf(slotCode) {
     return this.findActiveBySlot(slotCode);
   }

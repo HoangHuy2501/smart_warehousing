@@ -3,10 +3,12 @@
 const db = require('../../config/db');
 const { TABLES: t, outboundRecipientPredicate } = require('../../config/tables');
 
+// Chuẩn bị mã băm dùng làm tham số SQL.
 function hashParameter() {
     return db.getDialect() === 'pg' ? "decode(?, 'hex')" : 'CONVERT(BINARY(32), ?, 2)';
 }
 
+// Lưu hoặc cập nhật đăng ký push của thiết bị.
 async function save(subscription) {
     const { id, empNo, endpoint, hash, p256dh, auth, platform } = subscription;
     return db.withTransaction(async (tx) => {
@@ -31,17 +33,20 @@ async function save(subscription) {
     });
 }
 
+// Xóa đăng ký push theo thiết bị và tài khoản.
 async function remove(empNo, hash) {
     await db.query(`DELETE FROM ${t.pushSubscription} WHERE emp_no = ? AND endpoint_hash = ${hashParameter()}`,
         [empNo, hash]);
 }
 
+// Xóa đăng ký push hết hiệu lực.
 async function removeExpired(subscription) {
     await db.query(`DELETE FROM ${t.pushSubscription}
         WHERE id = ? AND emp_no = ? AND endpoint = ? AND p256dh = ? AND auth = ?`,
     [subscription.id, subscription.emp_no, subscription.endpoint, subscription.p256dh, subscription.auth]);
 }
 
+// Tra danh sách thiết bị cần nhận thông báo.
 async function findRecipients(sheetNo) {
     const { rows } = await db.query(`
         SELECT d.id, d.emp_no, d.endpoint, d.p256dh, d.auth, d.platform, u.role

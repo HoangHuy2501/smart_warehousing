@@ -15,16 +15,19 @@ function limitSqlReads(handler, { windowMs = 5000, waitMs = 10000 } = {}) {
   let timer;
   let nextCleanup = 0;
 
+  // Loại các lượt đọc SQL đã ra khỏi cửa sổ giới hạn.
   function prune(timestamps, now) {
     while (timestamps.length && timestamps[0] <= now - windowMs) timestamps.shift();
   }
 
+  // Trả lỗi giới hạn đọc SQL hoặc hàng đợi đầy.
   function reject(entry, status, retryMs = windowMs) {
     entry.res.set('Retry-After', String(Math.max(1, Math.ceil(retryMs / 1000))));
     const code = status === 429 ? 'rate_limited' : 'sql_queue_busy';
     entry.next(new ApiError(code, status, code));
   }
 
+  // Xử lý các request đang đợi khi còn lượt đọc SQL.
   function drain() {
     clearTimeout(timer);
     const now = performance.now();

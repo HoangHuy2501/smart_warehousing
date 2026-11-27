@@ -5,6 +5,7 @@
 
 'use strict';
 
+// Chuyển lỗi bất đồng bộ sang middleware xử lý lỗi.
 function asyncHandler(fn) {
   return (req, res, next) => {
     Promise.resolve(fn(req, res, next)).catch(next);

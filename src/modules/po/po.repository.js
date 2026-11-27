@@ -472,6 +472,7 @@ class PoModel {
     return { query, params };
   }
 
+  // Lấy trang PO và tổng số dòng, số mã PO theo cùng bộ lọc.
   async searchPurchases(opts) {
     const result = await pagination({
       ...this.purchaseQuery(opts),

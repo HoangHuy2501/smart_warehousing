@@ -15,16 +15,19 @@ const SearchService = require('./search.service');
 
 // ---- TIM KIEM (GET read-only — query khong hop le tu ve mac dinh) ----
 
+// Xử lý yêu cầu tìm kiếm PO có phân trang.
 const searchPos = async (req, res) => {
   // Truyen actor (SESSION) xuong service — KEEPER chi thay NPL duoc phan;
   // KHONG nhan keeperEmpNo tu query.
   res.json(await SearchService.searchPos(req.query, req.actor));
 };
 
+// Tìm mã kệ theo từ khóa.
 const searchSlots = async (req, res) => {
   res.json(await SearchService.searchSlots(req.query.keyword));
 };
 
+// Tìm kiếm nhật ký hoạt động theo bộ lọc.
 const searchActivity = async (req, res) => {
   res.json(await SearchService.searchActivity(req.query));
 };

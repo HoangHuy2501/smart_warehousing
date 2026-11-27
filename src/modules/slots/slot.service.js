@@ -31,16 +31,19 @@ const SlotRepository = require('./slot.repository');
 /** @type {import('../accounts/account.repository').AccountModel} */
 const AccountsRepository = require('../accounts/account.repository');
 
+// Đổi mã kho WHS sang mã kho T8.
 function warehouseNumber(slot) {
   const stNo = t8WarehouseNumbers[slot.warehouse];
   if (!stNo) err('t8_warehouse_unmapped', 409);
   return stNo;
 }
 
+// Khóa vị trí kệ trước khi cập nhật.
 async function lockSlot(code, query) {
   await T8Slots.lock(code, query);
 }
 
+// Kiểm tra mã kệ đã tồn tại trên T8.
 async function checkT8Slot(code, stNo, query) {
   const rows = await T8Slots.find(code, query);
   if (rows.length > 1 || (rows.length === 1 && rows[0].st_no?.trim() !== stNo)) {
@@ -49,11 +52,13 @@ async function checkT8Slot(code, stNo, query) {
   return rows.length === 1;
 }
 
+// Chọn mã tài khoản T8 dùng để ghi nhận người sửa.
 function t8ModifyUser(actor) {
   const empNo = String(actor.employeeCode ?? actor.id).trim();
   return empNo.slice(0, 4).toUpperCase() === 'TEST' ? 'ADM' : empNo;
 }
 
+// Chuẩn bị các trường của kệ từ dữ liệu đầu vào.
 function slotFields(dto) {
   const limits = { warehouse: 20, row: 5, floor: 2, position: 2 };
   const fields = {};
@@ -68,6 +73,7 @@ function slotFields(dto) {
   return { code, ...fields };
 }
 
+// Tạo vị trí tương ứng trên T8.
 async function createT8Slot(slot, actor, query) {
   const stNo = warehouseNumber(slot);
   if (await checkT8Slot(slot.code, stNo, query)) {
@@ -77,6 +83,7 @@ async function createT8Slot(slot, actor, query) {
   }
 }
 
+// Đổi mã vị trí tương ứng trên T8.
 async function renameT8Slot(oldSlot, newSlot, actor, query) {
   const stNo = warehouseNumber(oldSlot);
   const exists = await checkT8Slot(oldSlot.code, stNo, query);
@@ -139,6 +146,7 @@ class SlotServices {
     // Fallback hồ sơ test áp tại service để tên thủ kho test hiển thị
     // đúng ngay cả khi t8_bas_emp chưa có dữ liệu thật.
     const accounts = (await AccountsRepository.list()).map(withTestProfile);
+    // Tra tên thủ kho để hiển thị trong nhật ký.
     const nameOf = (empNo) => {
       if (!empNo) return 'Chưa có thủ kho';
       const found = accounts.find((account) => account.id === empNo);

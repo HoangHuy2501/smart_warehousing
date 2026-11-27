@@ -7,14 +7,17 @@ const { executeBatch } = require('../util/api-sql-deadline');
 
 let pool;
 
+// Trả chế độ kết nối cơ sở dữ liệu hiện tại.
 function getMode() {
   return resolveDbConfig().mode;
 }
 
+// Trả cú pháp SQL dùng cho kết nối hiện tại.
 function getDialect() {
   return 'mssql';
 }
 
+// Khởi tạo và tái sử dụng pool kết nối SQL Server.
 async function getPool() {
   if (!pool) {
     const { ConnectionPool } = require('mssql');
@@ -44,6 +47,7 @@ function convertPlaceholders(text, token) {
   return text.replace(/\?/g, () => token.replace('{n}', (index += 1)));
 }
 
+// Gắn tham số và thực thi câu SQL trên kết nối được cấp.
 async function executeSqlServerRequest(request, text, params) {
   const mssql = require('mssql');
   const named = convertPlaceholders(text, '@p{n}');

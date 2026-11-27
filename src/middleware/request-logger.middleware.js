@@ -12,6 +12,7 @@
 
 'use strict';
 
+// Ghi method, đường dẫn, mã phản hồi và thời gian xử lý.
 function requestLogger(req, res, next) {
     const startedAt = Date.now();
     const method = req.method;
@@ -43,6 +44,7 @@ function requestLogger(req, res, next) {
     next();
 }
 
+// Giữ stack lỗi trên response để middleware ghi log.
 function attachErrorStack(err, req, res, next) {
     if (err && err.stack && (err.httpStatus >= 500 || !err.httpStatus)) {
         res._errorStack = err.stack;

@@ -35,8 +35,10 @@ const ReceiptSyncRepository = require('../lots/receipt-sync.repository');
 const ReceiptRepository = require('../lots/receipt.repository');
 const PoRepository = require('../po/po.repository');
 
+// Làm tròn số lượng dùng trong đối soát.
 const roundQty = (n) => Math.round(Number(n || 0) * 1e6) / 1e6;
 
+// Chuẩn hóa ngày giờ sang chuỗi ISO.
 function toIso(value) {
     if (!value) return null;
     if (value instanceof Date) return value.toISOString();

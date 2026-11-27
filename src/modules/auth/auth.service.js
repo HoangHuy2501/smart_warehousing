@@ -41,6 +41,7 @@ const TOKEN_TTL = '365d';
 const JWT_SECRET = process.env.JWT_SECRET || 'gws-dev-secret-change-me';
 
 class AuthServices {
+  // Khởi tạo bộ theo dõi phiên và token đã thu hồi.
   constructor() {
     /** Map<jti, expiresAtMs> — token đã logout, chưa hết hạn thì từ chối. */
     this.revoked = new Map();

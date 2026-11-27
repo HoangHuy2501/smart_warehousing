@@ -22,6 +22,7 @@
  *   bucketCounts, van hien thi khi khong loc bucket)
  */
 
+// Định dạng ngày thành chuỗi YYYY-MM-DD.
 function toIsoDay(date) {
   const y = date.getFullYear();
   const m = String(date.getMonth() + 1).padStart(2, '0');
@@ -35,6 +36,7 @@ function toIsoDay(date) {
  */
 function computeBucketDates(now = new Date()) {
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  // Dịch ngày hiện tại theo số ngày được yêu cầu.
   const shift = (date, days) =>
     new Date(date.getFullYear(), date.getMonth(), date.getDate() + days);
   return {

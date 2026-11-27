@@ -2,6 +2,7 @@
 
 const db = require('../config/db');
 
+// Đọc số nguyên dương và áp dụng giới hạn mặc định.
 function positiveInt(value, fallback, max = Number.MAX_SAFE_INTEGER) {
   if (value == null || value === '') return fallback;
   const number = Number(value);
@@ -11,6 +12,7 @@ function positiveInt(value, fallback, max = Number.MAX_SAFE_INTEGER) {
   return Math.min(number, max);
 }
 
+// Lấy trang kết quả và đếm số dòng theo cùng câu SELECT.
 async function pagination({
   query, params = [], page, pageSize, orderBy = '(SELECT NULL)',
   count = true, distinctBy, withSql = '', parallel = false,
@@ -33,6 +35,7 @@ async function pagination({
   const distinctCount = distinctBy
     ? `, COUNT(DISTINCT pg_source.${pg ? '"' + distinctBy + '"' : '[' + distinctBy + ']'}) AS ${pg ? '"totalDistinct"' : '[totalDistinct]'}`
     : '';
+  // Đọc dữ liệu trang theo thứ tự và số dòng đã tính.
   const fetchPage = () => db.query(`
     ${withSql}
     SELECT *

@@ -6,6 +6,7 @@ const { requireAuth, requireWarehouseOperator } = require('../../middleware/auth
 const { asyncHandler } = require('../../util/async-handler');
 const { limitSqlReads } = require('../../middleware/sql-load.middleware');
 
+// Đăng ký API xuất kho và middleware kiểm tra quyền.
 module.exports = function registerOutboundRoutes(router) {
   router.get('/push-devices/config', requireAuth, requireWarehouseOperator, asyncHandler(pushDevices.config));
 

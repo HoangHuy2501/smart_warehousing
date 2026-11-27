@@ -3,6 +3,7 @@
 const db = require('../../config/db');
 const { TABLES } = require('../../config/tables');
 
+// Lấy một nhóm phân bổ SEND_STOCK còn hiệu lực để kiểm tra.
 async function findCandidates(cutoff, afterId, limit) {
     const { rows } = await db.query(`
         SELECT id FROM ${TABLES.allocation}
@@ -15,6 +16,7 @@ async function findCandidates(cutoff, afterId, limit) {
     return rows.map((row) => row.id);
 }
 
+// Đối chiếu lượng cần nhập và lượng đã ghi trên T8 theo dòng tạm nhập.
 async function findNoticeCoverage(noticeIds, tx) {
     const { rows } = await tx(`
         SELECT

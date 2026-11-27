@@ -7,6 +7,7 @@ const { requireBodyFields } = require('../../middleware/validate.middleware');
 const { requireAuth } = require('../../middleware/auth.middleware');
 const { asyncHandler } = require('../../util/async-handler');
 
+// Đăng ký API vị trí kệ và middleware kiểm tra quyền.
 module.exports = function registerSlotsRoutes(router) {
   router.get('/slots', requireAuth, asyncHandler(overviewController.listSlots));
 
