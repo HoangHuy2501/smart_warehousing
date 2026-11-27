@@ -15,10 +15,10 @@ const { syncAllocation } = require('../src/modules/inbound/stock-sync.service');
 for (const scenario of [
     { name: 'đã duyệt đủ', imported: 100, draft: 0 },
     { name: 'đã có phiếu nháp đủ', imported: 0, draft: 100 },
-    { name: 'tạo nháp phần còn thiếu', imported: 30, draft: 20, expected: '50.00000000' },
-    { name: 'ghi nối vào phiếu nháp cùng tạm nhập', imported: 0, draft: 40, expected: '60.00000000', reuse: true },
+    { name: 'không ghi thêm khi T8 mới nhập một phần', imported: 30, draft: 20 },
+    { name: 'dùng lại đầu phiếu nháp cho dòng chưa có trên T8', imported: 0, draft: 0, expected: '100.00000000', reuse: true },
     { name: 'lưu một phần và giữ WAITING_STOCK', imported: 0, draft: 0, input: '40', expected: '40.00000000', partial: true },
-    { name: 'lấy số còn thiếu của kệ sau khi gửi một phần', imported: 0, draft: 40, slotQty: 40, expected: '60.00000000', reuse: true },
+    { name: 'không ghi thêm khi T8 đã có nháp một phần', imported: 0, draft: 40 },
     { name: 'từ chối số lượng vượt mức', imported: 0, draft: 0, input: '101', invalid: true },
     { name: 'từ chối bản xem trước cũ sau khi lượng T8 đổi', imported: 0, draft: 0, stale: true },
     { name: 'dùng mã vị trí rút gọn trên T8, giữ mã kệ WHS trên form', imported: 0, draft: 0, expected: '100.00000000', shortCode: '03-01' },
@@ -46,12 +46,13 @@ for (const scenario of [
         }]);
         let changed = false;
         t.mock.method(t8, 'findWaitingPeers', async () => []);
-        t.mock.method(t8, 'findSource', async (id, poId, goodsNo, slotCode) => {
-            assert.deepEqual([id, poId, goodsNo, slotCode], [1, 8, 'GOODS', 'A1-1']);
+        t.mock.method(t8, 'findSource', async (id, poId, goodsNo, query) => {
+            assert.deepEqual([id, poId, goodsNo], [1, 8, 'GOODS']);
+            assert.ok(query === tx || query === db.query);
             return {
                 notice_no: 'PN', notice_id: 2, pur_no: 'PO', pur_id: 3, goods_no: 'GOODS',
                 made_lot: 'LOT', sheet_qty: 100, return_qty: 0, match_count: 1, adj_result: '1',
-                draft_qty: scenario.draft + (changed ? 1 : 0), slot_qty: scenario.slotQty, su_no: 'SU', st_no: '999',
+                receipt_count: Number(Boolean(scenario.draft || scenario.imported || changed)), su_no: 'SU', st_no: '999',
                 sheet_pri: 500, unit_rate: 1, pri_dis: 1,
             };
         });
@@ -155,7 +156,7 @@ test('ghép hai kệ cùng lot và giữ mã vị trí T8 riêng trên từng d�
     }]);
     t.mock.method(t8, 'findSource', async () => ({
         notice_no: 'PN', su_no: 'SU', st_no: '101', sheet_qty: 100, return_qty: 0,
-        match_count: 1, adj_result: '1', draft_qty: 0, slot_qty: 0,
+        match_count: 1, adj_result: '1', receipt_count: 0,
         sheet_pri: 500, unit_rate: 1, pri_dis: 1,
     }));
     t.mock.method(t8, 'findActiveSlotCode', async (_, code) => code);
