@@ -18,16 +18,12 @@ function guardParams(params) {
 function searchParams(opts) {
   const kw = String(opts.keyword || '').trim();
   return {
-    bucket: opts.bucket ?? null,
     // 5 mốc bucket mới (2026-10-20) — date-only YYYY-MM-DD từ service
     today: opts.today ?? null,
     prevMonthStart: opts.prevMonthStart ?? null,
     twoMonthsAgoStart: opts.twoMonthsAgoStart ?? null,
     next3End: opts.next3End ?? null,
     next7End: opts.next7End ?? null,
-    // Keeper NPL permission — TỪ SESSION, không bao giờ nhận từ client;
-    // manager => null (không lọc)
-    keeperEmpNo: opts.keeperEmpNo ?? null,
     prefixPattern: kw ? `${kw}%` : null,
     containsPattern: kw ? `%${kw}%` : null,
   };
@@ -390,28 +386,10 @@ class PoModel {
       and o1.close_sw = 0
       and (datediff(day, o.del_date, getdate()) > -30 and datediff(day, o.del_date, getdate()) < 30)
     `;
-    // Áp dụng quyền và bộ lọc màn hình bên ngoài điều kiện PO cố định.
+    // Tìm theo từ khóa trên tập PO đủ điều kiện cố định.
     const query = `
     SELECT p.* FROM (${source}) AS p
     WHERE (
-        CAST(? AS NVARCHAR(20)) IS NULL
-        OR EXISTS (
-          SELECT 1 FROM whs_keeper_material_assignment ma
-          WHERE ma.keeper_emp_no = ?
-            AND ma.goods_no = p.[itemCode]
-            AND ma.ended_at IS NULL
-        )
-      )
-      AND (
-        CAST(? AS NVARCHAR(10)) IS NULL
-        OR (? = 'overdue' AND (p.[eta] IS NULL OR p.[eta] < ?))
-        OR (? = 'od3p' AND (p.[eta] IS NULL OR p.[eta] < ?))
-        OR (? = 'od2' AND p.[eta] >= ? AND p.[eta] < ?)
-        OR (? = 'od1' AND p.[eta] >= ? AND p.[eta] < ?)
-        OR (? = 'next3' AND p.[eta] >= ? AND p.[eta] < ?)
-        OR (? = 'next7' AND p.[eta] >= ? AND p.[eta] < ?)
-      )
-      AND (
         CAST(? AS NVARCHAR(140)) IS NULL
         OR p.[poNumber] LIKE ?
         OR p.[itemCode] LIKE ?
@@ -421,11 +399,6 @@ class PoModel {
       )
     `;
     const params = [
-      sp.keeperEmpNo, sp.keeperEmpNo,
-      sp.bucket, sp.bucket, sp.today, sp.bucket, sp.twoMonthsAgoStart,
-      sp.bucket, sp.twoMonthsAgoStart, sp.prevMonthStart,
-      sp.bucket, sp.prevMonthStart, sp.today,
-      sp.bucket, sp.today, sp.next3End, sp.bucket, sp.next3End, sp.next7End,
       sp.prefixPattern, sp.prefixPattern, sp.prefixPattern, sp.prefixPattern,
       sp.containsPattern, sp.containsPattern,
     ];
@@ -447,11 +420,11 @@ class PoModel {
 
   /**
    * GET /api/warehouse/pos?counts=1 — đếm mã PO duy nhất theo từng nhóm ETA.
-   * Giữ bộ lọc từ khóa và quyền thủ kho để đếm các tab trong cùng request.
+   * Giữ bộ lọc từ khóa khi đếm theo nhóm ngày dự kiến.
    */
   async countPurchaseBuckets(opts) {
-    const sp = searchParams({ ...opts, bucket: null });
-    const source = this.purchaseQuery({ ...opts, bucket: null });
+    const sp = searchParams(opts);
+    const source = this.purchaseQuery(opts);
     const sqlBuckets = `
       WITH bucketed AS (
         SELECT p.[poNumber] AS po_number,

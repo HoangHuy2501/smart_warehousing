@@ -19,7 +19,7 @@ test('PO ETA totals use the same filters as the list without page limits', async
         return { rows: [] };
     });
     const filters = {
-        bucket: 'overdue', keyword: 'PO', page: 2, pageSize: 10,
+        bucket: 'overdue', keeperEmpNo: 'EMP', keyword: 'PO', page: 2, pageSize: 10,
         today: '2026-11-25', twoMonthsAgoStart: '2026-09-01', prevMonthStart: '2026-10-01',
         next3End: '2026-11-29', next7End: '2026-12-03',
     };
@@ -28,7 +28,9 @@ test('PO ETA totals use the same filters as the list without page limits', async
     const list = calls.find(({ sql }) => sql.includes('OFFSET'));
     assert.equal(calls.length, 2);
     assert.doesNotMatch(count.sql, /OFFSET|CREATE TABLE|INTO #/);
-    assert.match(count.sql, /'overdue' AND \(p.\[eta\] IS NULL OR p.\[eta\] < \?\)/);
+    assert.match(count.sql, /p\.\[poNumber\] LIKE/);
+    assert.doesNotMatch(count.sql, /whs_keeper_material_assignment|od3p|overdue/);
+    assert.deepEqual(count.params, ['PO%', 'PO%', 'PO%', 'PO%', '%PO%', '%PO%']);
     assert.match(list.sql, /end as status_po/i);
     assert.match(list.sql, /left join pur_in1 i1 with\(nolock\) on i.sheet_no = i1.sheet_no/);
     assert.match(list.sql, /n\.pur_id = o\.sheet_id/);
