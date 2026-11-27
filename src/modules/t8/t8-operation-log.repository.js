@@ -8,6 +8,7 @@ const LOG_COLUMNS = ['user_no', 'log_desc', 'modify_date', 'oper_type', 'win_des
 
 const { literal } = require('../../util/sql-audit');
 
+// Ghi thao tác thay đổi dữ liệu vào nhật ký T8.
 async function insert({ employeeNo, tableName, operation, description }, query) {
     const operType = OPER_TYPES[operation];
     if (!operType) throw new Error('t8_oper_log_invalid_operation');

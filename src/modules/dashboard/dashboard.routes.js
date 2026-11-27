@@ -6,6 +6,7 @@ const { requireAuth, requireManager, requireIt } = require('../../middleware/aut
 const { asyncHandler } = require('../../util/async-handler');
 const { limitSqlReads } = require('../../middleware/sql-load.middleware');
 
+// Đăng ký API giám sát vận hành và middleware kiểm tra quyền.
 module.exports = function registerDashboardRoutes(router) {
   router.get('/it/workers', requireAuth, requireIt, asyncHandler(itDashboard.workers));
 

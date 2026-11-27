@@ -4,6 +4,7 @@ const db = require('../../config/db');
 const { TABLES: t } = require('../../config/tables');
 const operationLog = require('../t8/t8-operation-log.repository');
 
+// Khóa mã vị trí T8 trước khi tạo hoặc sửa.
 async function lock(code, query) {
     if (db.getDialect() === 'pg') {
         await query('SELECT pg_advisory_xact_lock(hashtext(?))', ['whs-slot:' + code]);
@@ -17,6 +18,7 @@ async function lock(code, query) {
     `, ['whs-slot:' + code]);
 }
 
+// Tra vị trí kệ theo mã trên T8.
 async function find(code, query) {
     const hint = db.getDialect() === 'pg' ? '' : 'WITH (UPDLOCK, HOLDLOCK)';
     const { rows } = await query(`
@@ -25,6 +27,7 @@ async function find(code, query) {
     return rows;
 }
 
+// Thêm vị trí kệ mới vào danh mục T8.
 async function insert(slot, stNo, modifyUser, query) {
     const now = db.getDialect() === 'pg' ? 'CURRENT_TIMESTAMP' : 'GETDATE()';
     await query(`
@@ -41,6 +44,7 @@ async function insert(slot, stNo, modifyUser, query) {
     }, query);
 }
 
+// Cập nhật mã vị trí kệ trên T8.
 async function rename(oldCode, newCode, stNo, modifyUser, query) {
     const now = db.getDialect() === 'pg' ? 'CURRENT_TIMESTAMP' : 'GETDATE()';
     await query(`
@@ -57,6 +61,7 @@ async function rename(oldCode, newCode, stNo, modifyUser, query) {
     }, query);
 }
 
+// Kiểm tra có dữ liệu đang tham chiếu đến kệ.
 async function hasReferences(stNo, code, query) {
     const { rows } = await query(`
         SELECT 1 AS found WHERE EXISTS (

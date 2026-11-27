@@ -133,6 +133,7 @@ function hasLot(lotNo) {
  * @returns {string}
  */
 function buildIdentityKey(row) {
+    // Chuẩn hóa giá trị chuỗi để đối chiếu dữ liệu IQC.
     const text = (value) => String(value === null || value === undefined ? '' : value).trim().toUpperCase();
     return [
         text(row.sheetNo),
@@ -244,6 +245,7 @@ function buildReceiptIqcPatch(receipt, iqcRow, entry, updatedAt) {
     };
 }
 
+// Chuẩn hóa ngày để so sánh dữ liệu IQC.
 function dateValue(value) {
     return value == null ? null : new Date(value).getTime();
 }

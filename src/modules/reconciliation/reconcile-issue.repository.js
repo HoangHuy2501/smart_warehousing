@@ -36,10 +36,12 @@ const TABLE_PAIRS = [['whs_reconcile_issue', TABLES.reconcileIssue]];
 
 // ==================== PRIVATE: HỖ TRỢ DIALECT ====================
 
+// Kiểm tra có đang dùng cú pháp PostgreSQL không.
 function isPg() {
     return db.getDialect() === 'pg';
 }
 
+// Chuyển câu truy vấn sang cú pháp của kết nối hiện tại.
 function toDialect(text) {
     if (!isPg()) return text;
     let out = text;
@@ -66,6 +68,7 @@ function toDialect(text) {
     return out;
 }
 
+// Chặn tham số chưa được gán giá trị trước khi chạy SQL.
 function guardParams(params) {
     if (params.includes(undefined)) {
         throw new Error(

@@ -7,6 +7,7 @@ const { requireAuth, requireWarehouseOperator } = require('../../middleware/auth
 const { asyncHandler } = require('../../util/async-handler');
 const { limitSqlReads } = require('../../middleware/sql-load.middleware');
 
+// Đăng ký API lô hàng và middleware kiểm tra quyền.
 module.exports = function registerLotsRoutes(router) {
   router.get('/lots', requireAuth, limitSqlReads(overviewController.listLots));
 

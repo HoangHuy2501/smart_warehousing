@@ -6,6 +6,7 @@ const { requireBodyFields } = require('../../middleware/validate.middleware');
 const { requireAuth, requireManager, requireAccountAdmin } = require('../../middleware/auth.middleware');
 const { asyncHandler } = require('../../util/async-handler');
 
+// Đăng ký API tài khoản và middleware kiểm tra quyền.
 module.exports = function registerAccountsRoutes(router) {
   router.get('/accounts', requireAuth, asyncHandler(overviewController.listAccounts));
 

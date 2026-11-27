@@ -22,14 +22,17 @@ const UPDATE_CLAIM = `
     return redis.call('DEL', KEYS[1])
 `;
 
+// Đưa thông báo xuất kho vào hàng đợi gửi push.
 async function enqueueOutboundPush(sheetNo) {
     if (!vapidConfig()) return;
     await getProducerQueue(QUEUE_NAME).add('notify', { sheetNo });
 }
 
+// Tạo nội dung push từ dữ liệu xuất kho.
 function payloadFor(notice) {
     const { sheetNo, lines } = notice;
     const line = lines[0];
+    // Giới hạn độ dài nội dung thông báo.
     const clipped = (value, size) => String(value || '').slice(0, size);
     const poNumbers = line.poNumbers.slice(0, 3).map((po) => clipped(po, 50));
     const po = poNumbers.length ? poNumbers.join(', ') : 'Chưa xác định PO';
@@ -51,6 +54,7 @@ function payloadFor(notice) {
     });
 }
 
+// Gửi push đến thiết bị và xử lý lỗi gửi.
 async function deliver(redis, device, sheetNo, payload, vapidDetails) {
     if (!validEndpoint(device.endpoint)) return 'invalid_endpoint';
     const hash = createHash('sha256').update(JSON.stringify([device.emp_no, device.id, sheetNo])).digest('hex');
@@ -80,6 +84,7 @@ async function deliver(redis, device, sheetNo, payload, vapidDetails) {
     return 'sent';
 }
 
+// Xử lý job gửi thông báo xuất kho đến thiết bị.
 async function processOutboundPush(job) {
     const vapid = vapidConfig();
     if (!vapid) throw new Error('outbound_push_not_configured');

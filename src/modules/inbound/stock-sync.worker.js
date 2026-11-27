@@ -13,6 +13,7 @@ const { processStockSweep } = require('./stock-sync.job');
 const queueName = 'stock-sync';
 const logger = createWorkerLogger('stock-sync-worker');
 
+// Khởi động worker và đăng ký xử lý hàng đợi.
 async function main() {
     const problems = workerConfig.validateWorkerConfig(process.env.NODE_ENV === 'production');
     for (const problem of problems) logger.warn('worker_config_invalid', { problem });

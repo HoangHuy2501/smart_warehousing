@@ -9,6 +9,7 @@ const { enqueueOutboundPush } = require('./outbound-push.job');
 const logger = createWorkerLogger('outbound-job');
 const LIMIT = 100;
 
+// Tạo tác vụ rà soát các dòng xuất kho đang xử lý.
 function createSweep(load, process, getId, discovery = false, event = 'outbound_sweep_result') {
     let cursor = 0;
     return async (job) => {
@@ -47,6 +48,7 @@ function createSweep(load, process, getId, discovery = false, event = 'outbound_
     };
 }
 
+// Tạo tác vụ quét dòng xuất kho mới trên T8.
 function createDiscoverySweep(since) {
     const discover = createSweep((after, limit) => repo.discover(since, after, limit), service.plan, (row) => row.id, true);
     const removeDeleted = createSweep(repo.findMissingWaitingLines, service.removeDeletedWaitingLine,

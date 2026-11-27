@@ -45,6 +45,7 @@ const TABLES = {
   reconcileIssue: `${prefix}whs_reconcile_issue`,
 };
 
+// Tạo điều kiện SQL chọn tài khoản nhận thông báo xuất kho.
 function outboundRecipientPredicate(employeeSql, roleSql) {
   return `(
     ${roleSql ? `${roleSql} = 'MANAGER' OR` : ''}

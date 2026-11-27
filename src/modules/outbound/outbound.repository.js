@@ -25,6 +25,7 @@ const source = `
     LEFT JOIN ${t.goods} g ON g.goods_no = d.goods_no
 `;
 
+// Tìm các dòng xuất kho T8 cần đồng bộ.
 async function discover(since, after, limit) {
     const { rows } = await db.query(`
         ${source}
@@ -66,6 +67,7 @@ const missingWaitingLine = `
     )
 `;
 
+// Tìm các dòng đang chờ xử lý đã biến mất khỏi dữ liệu T8.
 async function findMissingWaitingLines(after, limit) {
     const { rows } = await db.query(`
         SELECT l.scm_out_detail_id
@@ -76,6 +78,7 @@ async function findMissingWaitingLines(after, limit) {
     return rows.map((row) => row.scm_out_detail_id);
 }
 
+// Kiểm tra lại một dòng xuất kho đang chờ có còn trên T8 không.
 async function isMissingWaitingLine(id, tx) {
     const { rows } = await tx(`
         SELECT l.scm_out_detail_id
@@ -85,11 +88,13 @@ async function isMissingWaitingLine(id, tx) {
     return rows.length > 0;
 }
 
+// Xóa dòng xuất kho khỏi bảng theo dõi WHS.
 async function deleteLine(id, tx) {
     await tx(`DELETE FROM ${t.outboundPick} WHERE scm_out_detail_id = ?`, [id]);
     await tx(`DELETE FROM ${t.outboundLine} WHERE scm_out_detail_id = ?`, [id]);
 }
 
+// Lấy các dòng xuất kho đang chờ phân bổ.
 async function ready(after, limit) {
     const { rows } = await db.query(`
         SELECT l.scm_out_detail_id
@@ -100,6 +105,7 @@ async function ready(after, limit) {
     return rows.map((row) => row.scm_out_detail_id);
 }
 
+// Giữ khóa trong transaction để tránh xử lý đồng thời.
 async function lock(tx) {
     if (db.getDialect() === 'pg') {
         await tx('SELECT pg_advisory_xact_lock(9203, 1)');
@@ -113,11 +119,13 @@ async function lock(tx) {
     `);
 }
 
+// Tra dòng dữ liệu xuất kho nguồn trên T8.
 async function findSource(id, tx) {
     const { rows } = await tx(`${source} WHERE d.id = ?`, [id]);
     return rows.length === 1 ? rows[0] : null;
 }
 
+// Tra dòng xuất kho đang theo dõi trong WHS.
 async function findLine(id, tx) {
     const { rows } = await tx(`
         SELECT l.*, CAST(l.requested_qty AS VARCHAR(40)) AS qty,
@@ -136,6 +144,7 @@ async function findLine(id, tx) {
     return rows[0];
 }
 
+// Ghi dòng xuất kho vào bảng theo dõi.
 async function insertLine(row, tx) {
     await tx(`INSERT INTO ${t.outboundLine}
         (scm_out_detail_id, sheet_no, goods_no, made_lot, unit_no, requested_qty, created_at)
@@ -143,6 +152,7 @@ async function insertLine(row, tx) {
     [row.id, row.sheet_no, row.goods_no, row.made_lot, row.unit_no, row.requested_qty, new Date()]);
 }
 
+// Lấy lượng còn có thể lấy trên các phân bổ tồn kho.
 async function available(line, tx) {
     const { rows } = await tx(`
         WITH candidates AS (
@@ -176,6 +186,7 @@ async function available(line, tx) {
     return rows;
 }
 
+// Ghi vị trí và số lượng cần lấy cho dòng xuất kho.
 async function insertPick(id, candidate, qty, tx) {
     await tx(`INSERT INTO ${t.outboundPick}
         (scm_out_detail_id, allocation_receipt_id, allocation_id, slot_code, planned_qty)
@@ -183,6 +194,7 @@ async function insertPick(id, candidate, qty, tx) {
     [id, candidate.receipt_id, candidate.allocation_id, candidate.slot_code, qty]);
 }
 
+// Lấy các lượt lấy hàng của dòng xuất kho.
 async function picks(id, tx) {
     const { rows } = await tx(`
         SELECT p.*, CAST(p.planned_qty AS VARCHAR(40)) AS planned,
@@ -205,16 +217,19 @@ async function picks(id, tx) {
     return rows;
 }
 
+// Ghi xác nhận một lượt lấy hàng.
 async function confirmPick(id, employee, now, tx) {
     await tx(`UPDATE ${t.outboundPick} SET picked_qty = planned_qty, picked_at = ?, picked_by_emp_no = ?
         WHERE id = CAST(? AS BIGINT) AND picked_at IS NULL`, [now, employee, String(id)]);
 }
 
+// Cập nhật trạng thái dòng xuất kho.
 async function setStatus(id, status, completedAt, tx) {
     await tx(`UPDATE ${t.outboundLine} SET status = ?, completed_at = ?
         WHERE scm_out_detail_id = ?`, [status, completedAt, id]);
 }
 
+// Trừ số lượng đã lấy khỏi phân bổ tồn kho.
 async function debitAllocationStock(id, qty, tx) {
     const output = db.getDialect() === 'pg' ? '' : 'OUTPUT CAST(inserted.qty_in_stock AS VARCHAR(40)) AS stock_after';
     const returning = db.getDialect() === 'pg' ? 'RETURNING CAST(qty_in_stock AS VARCHAR(40)) AS stock_after' : '';
@@ -229,12 +244,14 @@ async function debitAllocationStock(id, qty, tx) {
     return rows[0]?.stock_after ?? null;
 }
 
+// Đóng phân bổ khi đã lấy hết hàng.
 async function closeEmptyAllocation(id, now, tx) {
     await tx(`UPDATE ${t.allocation} SET closed_at = ?
         WHERE id = ? AND status = 'IN_STOCK' AND closed_at IS NULL
           AND qty_in_stock = 0 AND COALESCE(qty_return, 0) = 0`, [now, id]);
 }
 
+// Lấy danh sách xuất kho hiển thị cho người dùng.
 async function listNotifications(actor, sheetNo) {
     const scope = actor.role === 'MANAGER' ? '' : `AND ${outboundRecipientPredicate('?')}`;
     const sheetFilter = sheetNo ? 'AND l.sheet_no = ?' : '';
@@ -275,6 +292,7 @@ async function listNotifications(actor, sheetNo) {
     return rows;
 }
 
+// Tổng hợp lượng xuất theo mã phân bổ.
 async function quantitiesByAllocation(ids) {
     const result = new Map();
     for (let offset = 0; offset < ids.length; offset += 500) {
@@ -293,6 +311,7 @@ async function quantitiesByAllocation(ids) {
     return result;
 }
 
+// Chuyển các lượt lấy hàng chưa xác nhận sang phân bổ đích.
 async function movePendingPicks(allocationId, slotCode, tx) {
     await tx(`UPDATE ${t.outboundPick} SET slot_code = ?
         WHERE allocation_id = ? AND picked_at IS NULL
@@ -301,6 +320,7 @@ async function movePendingPicks(allocationId, slotCode, tx) {
     [slotCode, allocationId]);
 }
 
+// Tính lượng đang giữ cho các yêu cầu xuất kho.
 async function reservedForAllocation(id, tx) {
     const { rows } = await tx(`
         SELECT COALESCE(SUM(p.planned_qty), 0) AS reserved_qty

@@ -5,6 +5,7 @@ const { requireBodyFields } = require('../../middleware/validate.middleware');
 const { requireAuth, requireManager } = require('../../middleware/auth.middleware');
 const { asyncHandler } = require('../../util/async-handler');
 
+// Đăng ký API nguyên liệu và middleware kiểm tra quyền.
 module.exports = function registerMaterialsRoutes(router) {
   router.get(
     '/materials',

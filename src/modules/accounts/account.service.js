@@ -44,12 +44,14 @@ const MaterialRepository = require('../materials/material.repository');
 
 const ACCOUNT_ROLES = new Set(['KEEPER', 'MANAGER', 'IT']);
 
+// Kiểm tra quy tắc mật khẩu.
 function validatePassword(password) {
   if (typeof password !== 'string' || password.trim().length < 6) err('pw_short');
   if (password.length > 60) err('pw_too_long');
 }
 
 class AccountServices {
+  // Tra hồ sơ nhân viên theo mã.
   async lookupEmployee(employeeCode, actorId) {
     const actor = await shared.getActor(actorId);
     if (!actor.active || !['MANAGER', 'IT'].includes(actor.role)) err('no_permission', 403);
@@ -58,6 +60,7 @@ class AccountServices {
     return { ...employee, accountExists: Boolean(existing) };
   }
 
+  // Tra nhân viên từ dữ liệu T8.
   async findEmployee(value) {
     if (typeof value !== 'string' || /[\x00-\x1f\x7f]/.test(value)) {
       err('invalid_employee_code');
@@ -73,6 +76,7 @@ class AccountServices {
     return { employeeCode: employee.emp_no.trim(), name, email: null };
   }
 
+  // Tạo tài khoản kho theo quyền của người thao tác.
   async createAccount(dto) {
     const actor = await shared.getActor(dto.actorId);
     if (!actor.active || !['MANAGER', 'IT'].includes(actor.role)) err('no_permission', 403);

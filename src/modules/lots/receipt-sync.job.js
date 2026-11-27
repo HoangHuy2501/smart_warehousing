@@ -179,6 +179,7 @@ function advanceCursor(rows) {
     };
 }
 
+// Xác định khi nào cần quay con trỏ quét về đầu.
 function shouldWrapAround(rows, limit) {
     return rows.length < limit;
 }

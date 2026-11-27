@@ -9,6 +9,7 @@ const logger = createWorkerLogger('stock-sync-job');
 const BATCH_SIZE = 100;
 let cursor = '';
 
+// Quét các phân bổ đã gửi để kiểm tra nhập kho.
 async function processStockSweep() {
     const startedAt = Date.now();
     const candidates = await stock.findCandidates(previousMonthCutoff(), cursor, BATCH_SIZE);

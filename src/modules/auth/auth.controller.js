@@ -16,15 +16,18 @@ const AccountService = require('../accounts/account.service');
 
 // ---- AUTH / SESSION ----
 
+// Xác thực thông tin đăng nhập và trả phiên.
 const login = async (req, res) => {
   res.json(await AuthService.login(req.body.empNo, req.body.password));
 };
 
+// Kết thúc phiên đăng nhập hiện tại.
 const logout = (req, res) => {
   AuthService.logout(req.get('x-auth-token'));
   res.json({ ok: true });
 };
 
+// Trả hồ sơ người dùng của phiên hiện tại.
 const me = async (req, res) => {
   const account = await AuthService.me(req.actor);
   // 2026-10-21 (change request): KEEPER profile mo rong them kho + NPL

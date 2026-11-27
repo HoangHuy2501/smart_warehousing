@@ -6,6 +6,7 @@ const locks = require('../lots/receipt-sync.repository');
 const stock = require('./stock-sync.repository');
 const { previousMonthCutoff } = require('../../util/month-cutoff');
 
+// Cập nhật trạng thái tồn kho khi T8 đã ghi đủ số lượng.
 async function syncAllocation(id) {
     return db.withTransaction(async (tx) => {
         await locks.acquireAllocationLock(id, tx);

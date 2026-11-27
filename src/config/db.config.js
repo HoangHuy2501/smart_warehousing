@@ -1,5 +1,6 @@
 'use strict';
 
+// Đọc cấu hình kết nối SQL Server từ biến môi trường.
 function resolveMssqlConfig() {
   return {
     server: process.env.MSSQL_HOST,
@@ -16,6 +17,7 @@ function resolveMssqlConfig() {
   };
 }
 
+// Kiểm tra chế độ cơ sở dữ liệu và trả cấu hình SQL Server.
 function resolveDbConfig() {
   const mode = String(process.env.DB_MODE || 'sqlserver').trim().toLowerCase();
   if (mode && mode !== 'sqlserver') throw new Error('DB_MODE phải là sqlserver');

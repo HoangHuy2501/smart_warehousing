@@ -7,6 +7,7 @@ const { getProducerRedisConnection } = require('./redis');
 const KEY = `${config.prefix}:outbound:revision`;
 const TIMEOUT_MS = 1000;
 
+// Thực thi thao tác Redis cho phiên bản thông báo xuất kho.
 async function runRedis(operation) {
     const redis = getProducerRedisConnection();
     if (redis.status !== 'ready') return { ok: false };
@@ -26,6 +27,7 @@ async function runRedis(operation) {
     }
 }
 
+// Cập nhật phiên bản thông báo xuất kho trên Redis.
 async function publishOutboundRevision() {
     const result = await runRedis((redis) => redis.set(KEY, randomUUID()));
     return result.ok;
@@ -33,6 +35,7 @@ async function publishOutboundRevision() {
 
 let pendingRead;
 
+// Đọc phiên bản thông báo xuất kho hiện tại.
 function readOutboundRevision() {
     if (!pendingRead) {
         pendingRead = runRedis((redis) => redis.get(KEY))

@@ -9,6 +9,7 @@
 const debug = require('debug')('smart-whs-v3:error');
 const { ApiError } = require('../util/api-error');
 
+// Trả lỗi khi đường dẫn không khớp route.
 function notFoundHandler(req, res, next) {
   next(new ApiError('not_found', 404));
 }

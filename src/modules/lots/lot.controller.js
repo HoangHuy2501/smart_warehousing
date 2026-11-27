@@ -17,21 +17,25 @@ const { bindActor } = require('../../shared/bind-actor');
 
 // ---- LO HANG (whs_slot_allocation) ----
 
+// Xử lý yêu cầu gán dòng PO vào kệ.
 const assignShelf = async (req, res) => {
   bindActor(req);
   res.status(201).json(await LotService.assignShelf(req.body));
 };
 
+// Gửi kết quả IQC thủ công đến service.
 const injectDecision = async (req, res) => {
   bindActor(req);
   res.status(201).json(await LotService.injectIqcResult(req.params.id, req.body));
 };
 
+// Xử lý yêu cầu chuyển lô sang kệ khác.
 const moveLot = async (req, res) => {
   bindActor(req);
   await LotService.moveLot(req.params.id, req.body);
   res.status(201).json({ ok: true });
 };
+// Xử lý yêu cầu hoàn tác gán lô.
 const undoLot = async (req, res) => {
   bindActor(req);
   res.status(200).json(await LotService.undoAssign(req.params.id, req.body));

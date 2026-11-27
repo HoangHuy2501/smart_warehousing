@@ -12,6 +12,7 @@
 const { ApiError } = require('../util/api-error');
 const AuthService = require('../modules/auth/auth.service');
 
+// Xác thực token và gắn phiên người dùng vào request.
 function requireAuth(req, res, next) {
   const token = req.get('x-auth-token');
   const session = AuthService.authenticate(token);
@@ -22,6 +23,7 @@ function requireAuth(req, res, next) {
   return next();
 }
 
+// Giới hạn thao tác cho chủ quản.
 function requireManager(req, res, next) {
   if (!req.actor || req.actor.role !== 'MANAGER') {
     return next(new ApiError('no_permission', 403, 'no_permission'));
@@ -29,11 +31,13 @@ function requireManager(req, res, next) {
   return next();
 }
 
+// Giới hạn thao tác cho tài khoản IT.
 function requireIt(req, res, next) {
   if (req.actor?.role !== 'IT') return next(new ApiError('no_permission', 403, 'no_permission'));
   return next();
 }
 
+// Kiểm tra quyền quản lý tài khoản.
 function requireAccountAdmin(req, res, next) {
   if (!['MANAGER', 'IT'].includes(req.actor?.role)) {
     return next(new ApiError('no_permission', 403, 'no_permission'));
@@ -41,6 +45,7 @@ function requireAccountAdmin(req, res, next) {
   return next();
 }
 
+// Kiểm tra quyền thao tác kho.
 function requireWarehouseOperator(req, res, next) {
   if (!['MANAGER', 'KEEPER'].includes(req.actor?.role)) {
     return next(new ApiError('no_permission', 403, 'no_permission'));

@@ -17,16 +17,19 @@ const MaterialService = require('./material.service');
 
 // ---- PHAN CONG THU KHO NPL (whs_keeper_material_assignment) — chi MANAGER ----
 
+// Trả danh sách nguyên liệu theo bộ lọc.
 const listMaterials = async (req, res) => {
   res.json(await MaterialService.listMaterials(req.query));
 };
 
+// Gán thủ kho phụ trách nguyên liệu.
 const assignMaterialKeeper = async (req, res) => {
   res.status(201).json(
     await MaterialService.assignMaterialKeeper(req.body, req.actor)
   );
 };
 
+// Trả lịch sử phân công của nguyên liệu.
 const materialHistory = async (req, res) => {
   res.json(await MaterialService.materialHistory(req.params.goodsNo));
 };

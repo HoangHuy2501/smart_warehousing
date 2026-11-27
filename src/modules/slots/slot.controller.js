@@ -17,23 +17,27 @@ const { bindActor } = require('../../shared/bind-actor');
 
 // ---- KE HANG (whs_slots) ----
 
+// Xử lý yêu cầu tạo kệ mới.
 const createSlot = async (req, res) => {
   bindActor(req);
   res.status(201).json(await SlotService.createSlot(req.body));
 };
 
+// Gán thủ kho phụ trách kệ.
 const assignKeeper = async (req, res) => {
   bindActor(req);
   await SlotService.assignKeeper(req.body);
   res.status(201).json({ ok: true });
 };
 
+// Xử lý yêu cầu cập nhật kệ.
 const updateSlot = async (req, res) => {
   bindActor(req);
   await SlotService.updateSlot(req.params.code, req.body);
   res.json({ ok: true });
 };
 
+// Ghi nhận thao tác in QR cho kệ.
 const logQrPrint = async (req, res) => {
   bindActor(req);
   await SlotService.logQrPrint(req.body);

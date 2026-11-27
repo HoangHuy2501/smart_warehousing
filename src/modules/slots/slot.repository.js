@@ -442,6 +442,7 @@ class SlotModel {
     return this.byCode(rows[0].code, query);
   }
 
+  // Kiểm tra kệ còn phân bổ hàng chưa trả.
   async hasNonReturnedAllocation(code, query = db.query) {
     const { rows } = await query(`
       SELECT 1 AS found WHERE EXISTS (
@@ -452,6 +453,7 @@ class SlotModel {
     return rows.length > 0;
   }
 
+  // Kiểm tra có dữ liệu đang tham chiếu đến kệ.
   async hasReferences(code, query = db.query) {
     const { rows } = await query(`
       SELECT 1 AS found WHERE EXISTS (
@@ -543,6 +545,7 @@ class SlotModel {
     // COUNT(*) của PG trả bigint (string) — ép Number cho cả 2 dialect.
     return Number((rows[0] && rows[0].count) || 0);
   }
+  // Tra các lần di chuyển hàng liên quan đến kệ.
   async findMovements(limit = 50) {
     const sql = `
     -- DECLARE khong can tham so.

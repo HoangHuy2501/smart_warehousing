@@ -5,10 +5,12 @@ const { AsyncLocalStorage } = require('node:async_hooks');
 const apiContext = new AsyncLocalStorage();
 const SQL_TIMEOUT_MS = 45000;
 
+// Thiết lập giới hạn thời gian chạy SQL cho request API.
 function withApiSqlDeadline(req, res, next) {
   apiContext.run(true, next);
 }
 
+// Thực thi batch SQL theo giới hạn thời gian hiện tại.
 async function executeBatch(request, text, timeoutMs = SQL_TIMEOUT_MS) {
   if (!apiContext.getStore()) return request.batch(text);
 

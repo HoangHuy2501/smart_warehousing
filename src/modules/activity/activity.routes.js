@@ -6,6 +6,7 @@ const { requireBodyFields } = require('../../middleware/validate.middleware');
 const { requireAuth, requireWarehouseOperator } = require('../../middleware/auth.middleware');
 const { asyncHandler } = require('../../util/async-handler');
 
+// Đăng ký API nhật ký hoạt động và middleware kiểm tra quyền.
 module.exports = function registerActivityRoutes(router) {
   router.get('/activity', requireAuth, asyncHandler(searchController.searchActivity));
 
