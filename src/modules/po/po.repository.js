@@ -475,15 +475,15 @@ class PoModel {
             LEFT JOIN pur_in2 i WITH (NOLOCK) ON i.notice_no = n.sheet_no AND i.notice_id = n.sheet_id
         )
         SELECT
-            COUNT(DISTINCT CASE WHEN receipt_no IS NOT NULL AND sheet_sta = 1 THEN sheet_no END) AS [stockReceivedCount],
-            COUNT(DISTINCT CASE WHEN receipt_no IS NOT NULL AND sheet_sta <> 1 THEN sheet_no END) AS [stockReceiptRequestedCount],
-            COUNT(DISTINCT CASE WHEN notice_no IS NOT NULL AND sheet_sta1 = 1 THEN sheet_no END) AS [iqcCompletedCount],
-            COUNT(DISTINCT CASE WHEN notice_no IS NOT NULL AND sheet_sta1 <> 1 THEN sheet_no END) AS [awaitingIqcCount],
-            COUNT(DISTINCT CASE WHEN notice_no IS NULL THEN sheet_no END) AS [notArrivedCount],
-            COUNT(DISTINCT CASE WHEN notice_no IS NULL AND DATEDIFF(DAY, del_date, GETDATE()) > 0 THEN sheet_no END) AS [overdueCount],
-            COUNT(DISTINCT CASE WHEN notice_no IS NULL AND DATEDIFF(DAY, del_date, GETDATE()) BETWEEN -3 AND -1 THEN sheet_no END) AS [dueSoonCount],
-            COUNT(DISTINCT CASE WHEN notice_no IS NULL AND DATEDIFF(DAY, del_date, GETDATE()) = 0 THEN sheet_no END) AS [dueTodayCount],
-            COUNT(DISTINCT CASE WHEN notice_no IS NULL AND DATEDIFF(DAY, del_date, GETDATE()) < -3 THEN sheet_no END) AS [notYetDueCount]
+            COUNT(DISTINCT CASE WHEN receipt_no IS NOT NULL AND sheet_sta = 1 THEN sheet_no END) AS [IN_STOCK],
+            COUNT(DISTINCT CASE WHEN receipt_no IS NOT NULL AND sheet_sta <> 1 THEN sheet_no END) AS [SEND_STOCK],
+            COUNT(DISTINCT CASE WHEN notice_no IS NOT NULL AND sheet_sta1 = 1 THEN sheet_no END) AS [WAITING_STOCK],
+            COUNT(DISTINCT CASE WHEN notice_no IS NOT NULL AND sheet_sta1 <> 1 THEN sheet_no END) AS [WAITING_IQC],
+            COUNT(DISTINCT CASE WHEN notice_no IS NULL THEN sheet_no END) AS [NOT_ARRIVED],
+            COUNT(DISTINCT CASE WHEN notice_no IS NULL AND DATEDIFF(DAY, del_date, GETDATE()) > 0 THEN sheet_no END) AS [OVERDUE],
+            COUNT(DISTINCT CASE WHEN notice_no IS NULL AND DATEDIFF(DAY, del_date, GETDATE()) BETWEEN -3 AND -1 THEN sheet_no END) AS [DUE_SOON],
+            COUNT(DISTINCT CASE WHEN notice_no IS NULL AND DATEDIFF(DAY, del_date, GETDATE()) = 0 THEN sheet_no END) AS [DUE_TODAY],
+            COUNT(DISTINCT CASE WHEN notice_no IS NULL AND DATEDIFF(DAY, del_date, GETDATE()) < -3 THEN sheet_no END) AS [NOT_YET_DUE]
         FROM PO_Status;
     `);
     return rows;
