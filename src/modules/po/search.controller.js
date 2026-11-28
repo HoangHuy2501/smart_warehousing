@@ -36,5 +36,9 @@ const searchActivity = async (req, res) => {
 const searchPosCount = async (req, res) => {
   res.json(await SearchService.searchCountPoByStatus())
 }
+// nhà cung cấp giao chậm thiếu
+const supplierLate = async (req, res) => {
+  res.json(await SearchService.supplierLate())
+}
 
-module.exports = { searchPos, searchSlots, searchActivity, searchPosCount };
+module.exports = { searchPos, searchSlots, searchActivity, searchPosCount, supplierLate };

@@ -395,7 +395,6 @@ class PoModel {
           AND a.goods_no = o.goods_no
           AND a.closed_at IS NULL
       )
-    order by mat_no
     `;
     // Tìm theo từ khóa trên tập PO đủ điều kiện cố định.
     const query = `
@@ -424,7 +423,7 @@ class PoModel {
       parallel: true,
       page: opts.page,
       pageSize: opts.pageSize,
-      orderBy: '[eta], [poSort], [lotSort]',
+      orderBy: '[mat_no]',
     });
     return { rows: result.data, total: result.pagination.totalItems, poTotal: result.pagination.totalDistinct };
   }

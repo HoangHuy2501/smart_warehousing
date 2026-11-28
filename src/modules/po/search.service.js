@@ -134,6 +134,10 @@ class SearchServices {
   async searchCountPoByStatus() {
     return PoRepository.CountPoByStatus();
   }
+  // nhà cung cấp giao chậm thiếu
+  async supplierLate() {
+    return PoRepository.supplierLate();
+  }
 }
 
 module.exports = new SearchServices();

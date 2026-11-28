@@ -8,4 +8,5 @@ const { limitSqlReads } = require('../../middleware/sql-load.middleware');
 module.exports = function registerPoRoutes(router) {
   router.get('/pos', requireAuth, limitSqlReads(searchController.searchPos));
   router.get('/count/listPos', requireAuth, limitSqlReads(searchController.searchPosCount));
+  router.get('/pos/supllierLate', requireAuth, limitSqlReads(searchController.supplierLate));
 };
