@@ -338,9 +338,10 @@ class PoModel {
       o1.close_sw, o1.rem, n.sheet_no, n.adj_result, o1.check_date as po_date,
       o.sheet_no as po_no, o.sheet_id as po_id, o.goods_no as mat_no,
       g.goods_name as mat_name, gt.goods_type as mat_type, gt.goods_type_desc as mat_type_desc,
+      p.req_date AS pmc_date, datediff(day, p.req_date, n1.sheet_date) as gap_pmc_day,
       o.sheet_qty as po_qty, n.sheet_qty as temp_rcv_qty, n.sheet_qty1 as temp_foc_qty,
       n1.sheet_date as temp_rcv_date, o.del_date as su_reply_date,
-      datediff(day, o.del_date, getdate()) as late_date,
+      datediff(day, o.del_date, isnull(n1.sheet_date, getdate())) as late_date,
       n.return_qty as fail_qty, n.return_qty1 as fail_foc_qty,
       n.return_qty + n.return_qty1 as total_fail_qty,
       case when n.sheet_qty > 0 then (n.return_qty/ n.sheet_qty) * 100 else 0 end as r_fail_qty,
@@ -350,7 +351,7 @@ class PoModel {
            when i.sheet_no is not null and i.sheet_sta <> 1 then 'SEND_STOCK' -- Đã gửi yêu cầu nhập kho
            when n.sheet_no is not null and n.sheet_sta1 = 1 then 'WAITING_STOCK' -- Đã kiểm IQC
            when n.sheet_no is not null and n.sheet_sta1 <> 1 then 'WAITING_IQC' -- Chờ kiểm IQC
-           when n.sheet_no is null then 'NOT_ARRIVED' -- Hàng chưa về nhà máy
+           --when n.sheet_no is null then 'NOT_ARRIVED' -- Hàng chưa về nhà máy
            when datediff(day, o.del_date, getdate()) > 0 then 'OVERDUE' -- Lô hàng trễ hẹn
            when datediff(day, o.del_date, getdate()) between -3 and -1 then 'DUE_SOON' -- Dự kiến sắp về
            when datediff(day, o.del_date, getdate()) = 0 then 'DUE_TODAY' -- Dự kiến về hôm nay
@@ -381,10 +382,19 @@ class PoModel {
     left join pur_notice1 n1 with(nolock) on n1.sheet_no = n.sheet_no
     left join pur_in2 i with(nolock) on i.notice_no = n.sheet_no and i.notice_id = n.sheet_id
     left join pur_in1 i1 with(nolock) on i.sheet_no = i1.sheet_no
-    where i.sheet_no is null and o.close_sw = 0 and o1.sheet_date > '2026-01-01'
+    left join pur_plan2 p with(nolock) on p.sheet_no = o.plan_no and p.sheet_id = o.plan_id 
+    left join pur_plan1 p1 with(nolock) on p1.sheet_no = p.sheet_no
+    where o.close_sw = 0
       and o.sheet_sta = 1 and (n.adj_result <> 2 or n.adj_result is null)
-      and o1.close_sw = 0
-      and (datediff(day, o.del_date, getdate()) > -30 and datediff(day, o.del_date, getdate()) < 30)
+      and o1.close_sw = 0 and o.st_no=101 and  p.close_sw = 0 and p1.close_sw = 0 
+      and datediff(day, o.del_date, getdate()) between -30 and 30 and left (o.goods_no, 1) <> 'N'
+      AND NOT EXISTS (
+        SELECT 1
+        FROM whs_slot_allocation AS a
+        WHERE a.po_id = o.id
+          AND a.goods_no = o.goods_no
+          AND a.closed_at IS NULL
+      )
     `;
     // Tìm theo từ khóa trên tập PO đủ điều kiện cố định.
     const query = `
@@ -464,7 +474,7 @@ class PoModel {
         (
             SELECT o.id AS po_line_id, o.sheet_no, o.sheet_id, o.goods_no, o.del_date
             FROM pur_order2 o WITH (NOLOCK)
-            INNER JOIN pur_order1 o1 WITH (NOLOCK) ON o.sheet_no = o1.sheet_no
+            INNER JOIN pur_order1 o1 WITH (NOLOCK) ON o.sheet_no = o1.sheet_no and o.st_no=101
             WHERE o.close_sw = 0 AND o.sheet_sta = 1 AND o1.close_sw = 0 AND DATEDIFF(DAY, o.del_date, GETDATE()) > -30 AND DATEDIFF(DAY, o.del_date, GETDATE()) < 30
         ),
         PO_Status AS
