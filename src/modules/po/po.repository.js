@@ -457,6 +457,42 @@ class PoModel {
     return rows;
   }
 
+  // danh sách đếm đơn PO theo trạng thái
+  async CountPoByStatus() {
+    try {
+      const result = await db.request().query(`
+        ;WITH PO_Base AS
+        (
+            SELECT o.id AS po_line_id, o.sheet_no, o.sheet_id, o.goods_no, o.del_date
+            FROM pur_order2 o WITH (NOLOCK)
+            INNER JOIN pur_order1 o1 WITH (NOLOCK) ON o.sheet_no = o1.sheet_no
+            WHERE o.close_sw = 0 AND o.sheet_sta = 1 AND o1.close_sw = 0 AND DATEDIFF(DAY, o.del_date, GETDATE()) > -30 AND DATEDIFF(DAY, o.del_date, GETDATE()) < 30
+        ),
+        PO_Status AS
+        (
+            SELECT p.po_line_id, p.sheet_no, p.sheet_id, p.goods_no, p.del_date, n.sheet_no AS notice_no, n.sheet_sta1, i.sheet_no AS receipt_no, i.sheet_sta
+            FROM PO_Base p
+            LEFT JOIN pur_notice2 n WITH (NOLOCK) ON n.pur_no = p.sheet_no AND n.pur_id = p.sheet_id AND (n.adj_result <> 2 OR n.adj_result IS NULL)
+            LEFT JOIN pur_in2 i WITH (NOLOCK) ON i.notice_no = n.sheet_no AND i.notice_id = n.sheet_id
+        )
+        SELECT
+            COUNT(DISTINCT CASE WHEN receipt_no IS NOT NULL AND sheet_sta = 1 THEN sheet_no END) AS [Da nhap kho chinh thuc],
+            COUNT(DISTINCT CASE WHEN receipt_no IS NOT NULL AND sheet_sta <> 1 THEN sheet_no END) AS [Da gui yeu cau nhap kho chinh thuc],
+            COUNT(DISTINCT CASE WHEN notice_no IS NOT NULL AND sheet_sta1 = 1 THEN sheet_no END) AS [Da kiem IQC],
+            COUNT(DISTINCT CASE WHEN notice_no IS NOT NULL AND sheet_sta1 <> 1 THEN sheet_no END) AS [Dang doi kiem IQC],
+            COUNT(DISTINCT CASE WHEN notice_no IS NULL THEN sheet_no END) AS [Hang chua ve nha may],
+            COUNT(DISTINCT CASE WHEN notice_no IS NULL AND DATEDIFF(DAY, del_date, GETDATE()) > 0 THEN sheet_no END) AS [Lo hang tre hen],
+            COUNT(DISTINCT CASE WHEN notice_no IS NULL AND DATEDIFF(DAY, del_date, GETDATE()) BETWEEN -3 AND -1 THEN sheet_no END) AS [Lo hang du kien sap ve],
+            COUNT(DISTINCT CASE WHEN notice_no IS NULL AND DATEDIFF(DAY, del_date, GETDATE()) = 0 THEN sheet_no END) AS [Lo hang du kien ve hom nay],
+            COUNT(DISTINCT CASE WHEN notice_no IS NULL AND DATEDIFF(DAY, del_date, GETDATE()) < -3 THEN sheet_no END) AS [Lo hang chua giao]
+        FROM PO_Status;
+        `)
+      return result.recordset;
+    } catch (error) {
+      throw error
+    }
+  }
+
 }
 
 module.exports = new PoModel();

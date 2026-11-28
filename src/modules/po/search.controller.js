@@ -32,4 +32,9 @@ const searchActivity = async (req, res) => {
   res.json(await SearchService.searchActivity(req.query));
 };
 
-module.exports = { searchPos, searchSlots, searchActivity };
+// lấy danh sách Po theo đếm tổng trạng thái
+const searchPosCount = async (req, res) => {
+  res.json(await SearchService.searchCountPoByStatus())
+}
+
+module.exports = { searchPos, searchSlots, searchActivity, searchPosCount };

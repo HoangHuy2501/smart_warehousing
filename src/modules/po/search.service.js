@@ -43,6 +43,7 @@ const PoRepository = require('./po.repository');
 const SlotRepository = require('../slots/slot.repository');
 /** @type {import('../activity/activity.repository').ActivityModel} */
 const ActivityRepository = require('../activity/activity.repository');
+const { tryCatch } = require('bullmq');
 
 /** Bucket hợp lệ của query /pos — giá trị khác → coi như không truyền. */
 
@@ -127,6 +128,15 @@ class SearchServices {
       page,
       pageSize,
     };
+  }
+
+  // lấy tổng danh sách Po theo trạng thái
+  async searchCountPoByStatus() {
+    try {
+      return result = await PoRepository.CountPoByStatus()
+    } catch (error) {
+      throw error
+    }
   }
 }
 
