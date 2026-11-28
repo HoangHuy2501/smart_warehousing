@@ -346,15 +346,15 @@ class PoModel {
       case when n.sheet_qty > 0 then (n.return_qty/ n.sheet_qty) * 100 else 0 end as r_fail_qty,
       case when n.sheet_qty1 > 0 then (n.return_qty/ n.sheet_qty1) * 100 else 0 end as r_fail_foc_qty,
       case when (n.sheet_qty + n.sheet_qty) > 0 then ((n.return_qty + n.return_qty1)/ (n.sheet_qty + n.sheet_qty1)) * 100 else 0 end as r_total_fail_qty,
-      case when i.sheet_no is not null and i.sheet_sta = 1 then N'Da nhap ho chinh thuc'
-           when i.sheet_no is not null and i.sheet_sta <> 1 then N'Da gui yeu cau nhap kho chinh thuc'
-           when n.sheet_no is not null and n.sheet_sta1 = 1 then 'Da kiem IQC'
-           when n.sheet_no is not null and n.sheet_sta1 <> 1 then 'Dang doi kiem IQC'
-           when n.sheet_no is null then 'Hang chua ve nha may'
-           when datediff(day, o.del_date, getdate()) > 0 then 'Lo hang tre hen'
-           when datediff(day, o.del_date, getdate()) between -3 and -1 then 'Lo hang du kien sap ve'
-           when datediff(day, o.del_date, getdate()) = 0 then 'Lo hang du kien ve hom nay'
-           else 'Lo hang chua giao' end as status_po,
+      case when i.sheet_no is not null and i.sheet_sta = 1 then 'IN_STOCK' -- Đã nhập kho chính thức
+           when i.sheet_no is not null and i.sheet_sta <> 1 then 'SEND_STOCK' -- Đã gửi yêu cầu nhập kho
+           when n.sheet_no is not null and n.sheet_sta1 = 1 then 'WAITING_STOCK' -- Đã kiểm IQC
+           when n.sheet_no is not null and n.sheet_sta1 <> 1 then 'WAITING_IQC' -- Chờ kiểm IQC
+           when n.sheet_no is null then 'NOT_ARRIVED' -- Hàng chưa về nhà máy
+           when datediff(day, o.del_date, getdate()) > 0 then 'OVERDUE' -- Lô hàng trễ hẹn
+           when datediff(day, o.del_date, getdate()) between -3 and -1 then 'DUE_SOON' -- Dự kiến sắp về
+           when datediff(day, o.del_date, getdate()) = 0 then 'DUE_TODAY' -- Dự kiến về hôm nay
+           else 'NOT_YET_DUE' end as status_po, -- Chưa đến ngày giao
       CASE WHEN n.id IS NULL THEN CAST(o.id AS VARCHAR(40)) ELSE CONCAT(o.id, '-N', n.id) END AS [id],
       CAST(o.id AS VARCHAR(20)) AS [poLine],
       o.sheet_no AS [poNumber],
@@ -475,15 +475,15 @@ class PoModel {
             LEFT JOIN pur_in2 i WITH (NOLOCK) ON i.notice_no = n.sheet_no AND i.notice_id = n.sheet_id
         )
         SELECT
-            COUNT(DISTINCT CASE WHEN receipt_no IS NOT NULL AND sheet_sta = 1 THEN sheet_no END) AS [Da nhap kho chinh thuc],
-            COUNT(DISTINCT CASE WHEN receipt_no IS NOT NULL AND sheet_sta <> 1 THEN sheet_no END) AS [Da gui yeu cau nhap kho chinh thuc],
-            COUNT(DISTINCT CASE WHEN notice_no IS NOT NULL AND sheet_sta1 = 1 THEN sheet_no END) AS [Da kiem IQC],
-            COUNT(DISTINCT CASE WHEN notice_no IS NOT NULL AND sheet_sta1 <> 1 THEN sheet_no END) AS [Dang doi kiem IQC],
-            COUNT(DISTINCT CASE WHEN notice_no IS NULL THEN sheet_no END) AS [Hang chua ve nha may],
-            COUNT(DISTINCT CASE WHEN notice_no IS NULL AND DATEDIFF(DAY, del_date, GETDATE()) > 0 THEN sheet_no END) AS [Lo hang tre hen],
-            COUNT(DISTINCT CASE WHEN notice_no IS NULL AND DATEDIFF(DAY, del_date, GETDATE()) BETWEEN -3 AND -1 THEN sheet_no END) AS [Lo hang du kien sap ve],
-            COUNT(DISTINCT CASE WHEN notice_no IS NULL AND DATEDIFF(DAY, del_date, GETDATE()) = 0 THEN sheet_no END) AS [Lo hang du kien ve hom nay],
-            COUNT(DISTINCT CASE WHEN notice_no IS NULL AND DATEDIFF(DAY, del_date, GETDATE()) < -3 THEN sheet_no END) AS [Lo hang chua giao]
+            COUNT(DISTINCT CASE WHEN receipt_no IS NOT NULL AND sheet_sta = 1 THEN sheet_no END) AS [IN_STOCK], -- Đã nhập kho chính thức
+            COUNT(DISTINCT CASE WHEN receipt_no IS NOT NULL AND sheet_sta <> 1 THEN sheet_no END) AS [SEND_STOCK], -- Đã gửi yêu cầu nhập kho
+            COUNT(DISTINCT CASE WHEN notice_no IS NOT NULL AND sheet_sta1 = 1 THEN sheet_no END) AS [WAITING_STOCK], -- Đã kiểm IQC
+            COUNT(DISTINCT CASE WHEN notice_no IS NOT NULL AND sheet_sta1 <> 1 THEN sheet_no END) AS [WAITING_IQC], -- Chờ kiểm IQC
+            COUNT(DISTINCT CASE WHEN notice_no IS NULL THEN sheet_no END) AS [NOT_ARRIVED], -- Hàng chưa về nhà máy
+            COUNT(DISTINCT CASE WHEN notice_no IS NULL AND DATEDIFF(DAY, del_date, GETDATE()) > 0 THEN sheet_no END) AS [OVERDUE], -- Lô hàng trễ hẹn
+            COUNT(DISTINCT CASE WHEN notice_no IS NULL AND DATEDIFF(DAY, del_date, GETDATE()) BETWEEN -3 AND -1 THEN sheet_no END) AS [DUE_SOON], -- Dự kiến sắp về
+            COUNT(DISTINCT CASE WHEN notice_no IS NULL AND DATEDIFF(DAY, del_date, GETDATE()) = 0 THEN sheet_no END) AS [DUE_TODAY], -- Dự kiến về hôm nay
+            COUNT(DISTINCT CASE WHEN notice_no IS NULL AND DATEDIFF(DAY, del_date, GETDATE()) < -3 THEN sheet_no END) AS [NOT_YET_DUE] -- Chưa đến ngày giao
         FROM PO_Status;
     `);
     return rows;
