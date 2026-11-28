@@ -541,6 +541,44 @@ function buildSwaggerSpec() {
           },
         },
       },
+      '/api/warehouse/count/listPos': {
+        get: {
+          tags: ['Pos'],
+          summary: 'Đếm số đơn PO theo trạng thái',
+          description:
+            'Đếm số mã PO duy nhất trong từng nhóm trạng thái. Một PO có thể nằm trong nhiều nhóm. ' +
+            'Ngày dự kiến nằm trong khoảng lớn hơn -30 và nhỏ hơn 30 ngày so với hôm nay.',
+          responses: {
+            200: {
+              description: 'Mảng chứa một bản ghi tổng hợp.',
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'array',
+                    items: {
+                      type: 'object',
+                      properties: {
+                        'Da nhap kho chinh thuc': { type: 'integer', minimum: 0 },
+                        'Da gui yeu cau nhap kho chinh thuc': { type: 'integer', minimum: 0 },
+                        'Da kiem IQC': { type: 'integer', minimum: 0 },
+                        'Dang doi kiem IQC': { type: 'integer', minimum: 0 },
+                        'Hang chua ve nha may': { type: 'integer', minimum: 0 },
+                        'Lo hang tre hen': { type: 'integer', minimum: 0 },
+                        'Lo hang du kien sap ve': { type: 'integer', minimum: 0 },
+                        'Lo hang du kien ve hom nay': { type: 'integer', minimum: 0 },
+                        'Lo hang chua giao': { type: 'integer', minimum: 0 },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+            401: { description: 'Phiên đăng nhập không hợp lệ hoặc thiếu token.' },
+            429: { description: 'Vượt giới hạn đọc SQL.' },
+            503: { description: 'Hàng đợi SQL đang bận.' },
+          },
+        },
+      },
       '/api/warehouse/pos': {
         get: {
           tags: ['Pos'],

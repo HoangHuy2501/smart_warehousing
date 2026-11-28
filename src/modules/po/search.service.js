@@ -132,11 +132,7 @@ class SearchServices {
 
   // lấy tổng danh sách Po theo trạng thái
   async searchCountPoByStatus() {
-    try {
-      return result = await PoRepository.CountPoByStatus()
-    } catch (error) {
-      throw error
-    }
+    return PoRepository.CountPoByStatus();
   }
 }
 
