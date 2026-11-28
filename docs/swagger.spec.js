@@ -74,7 +74,7 @@ const LOT_SCHEMA = {
   properties: {
     id: { type: 'string', example: 'L1' },
     poNumber: { type: 'string', example: 'PO-25001' },
-    poLine: { type: 'string', example: '10' },
+    poLine: { type: 'string', example: '10', description: 'pur_order2.id dùng làm poId khi gán kệ.' },
     itemCode: { type: 'string', example: 'ITEM-SPCC' },
     material: { type: 'string', example: 'Thép tấm SPCC' },
     lotCode: {
@@ -118,7 +118,7 @@ const PO_SCHEMA = {
     id: {
       type: 'string',
       example: '18',
-      description: 't8_pur_order2.id — dung lam poId khi assign',
+      description: 'ID hiển thị của dòng PO hoặc dòng tạm nhập.',
     },
     poNumber: { type: 'string', example: 'PO-25011' },
     poLine: { type: 'string', example: '10' },
@@ -137,7 +137,37 @@ const PO_SCHEMA = {
       type: 'number',
       nullable: true,
       description:
-        'Tong so luong da gan ke (allocation active) theo server — dung tinh so du truc tiep',
+        'Tổng số lượng đã phân bổ theo dòng PO.',
+    },
+    close_sw: { type: 'string', nullable: true },
+    rem: { type: 'string', nullable: true },
+    sheet_no: { type: 'string', nullable: true },
+    adj_result: { type: 'string', nullable: true },
+    po_no: { type: 'string', nullable: true },
+    mat_no: { type: 'string', nullable: true },
+    mat_name: { type: 'string', nullable: true },
+    mat_type: { type: 'string', nullable: true },
+    mat_type_desc: { type: 'string', nullable: true },
+    sheetQty: { type: 'number', nullable: true },
+    po_qty: { type: 'number', nullable: true },
+    temp_rcv_qty: { type: 'number', nullable: true },
+    temp_foc_qty: { type: 'number', nullable: true },
+    fail_qty: { type: 'number', nullable: true },
+    fail_foc_qty: { type: 'number', nullable: true },
+    total_fail_qty: { type: 'number', nullable: true },
+    r_fail_qty: { type: 'number', nullable: true },
+    r_fail_foc_qty: { type: 'number', nullable: true },
+    r_total_fail_qty: { type: 'number', nullable: true },
+    po_id: { type: 'integer', nullable: true },
+    gap_pmc_day: { type: 'integer', nullable: true },
+    late_date: { type: 'integer', nullable: true },
+    po_date: { type: 'string', format: 'date-time', nullable: true },
+    pmc_date: { type: 'string', format: 'date-time', nullable: true },
+    temp_rcv_date: { type: 'string', format: 'date-time', nullable: true },
+    su_reply_date: { type: 'string', format: 'date-time', nullable: true },
+    status_po: {
+      type: 'string',
+      enum: ['IN_STOCK', 'SEND_STOCK', 'WAITING_STOCK', 'WAITING_IQC', 'OVERDUE', 'DUE_SOON', 'DUE_TODAY', 'NOT_YET_DUE'],
     },
     source: { type: 'string', example: 'mock' },
   },
@@ -217,7 +247,7 @@ const PO_LINE_PAGE_SCHEMA = {
     bucketCounts: {
       type: 'object',
       description:
-        'So DON (poNumber duy nhat) theo bucket ETA (2026-10-20: od1/od2/od3p/next3/next7) — loc theo keyword, KHONG loc bucket. del_date >= next7End nam ngoai 5 bucket → khong duoc dem.',
+        'Số mã PO duy nhất theo nhóm ngày dự kiến. Chỉ trả khi counts khác 0.',
       properties: {
         overdue: { type: 'integer', description: 'PO quá dự kiến, đếm một lần trên cả ba nhóm.' },
         od1: { type: 'integer' },
@@ -541,72 +571,105 @@ function buildSwaggerSpec() {
           },
         },
       },
+      '/api/warehouse/count/listPos': {
+        get: {
+          tags: ['Pos'],
+          summary: 'Đếm số đơn PO theo trạng thái',
+          description:
+            'Đếm số mã PO duy nhất trong từng nhóm trạng thái. Một PO có thể nằm trong nhiều nhóm. ' +
+            'Ngày dự kiến nằm trong khoảng lớn hơn -30 và nhỏ hơn 30 ngày so với hôm nay.',
+          responses: {
+            200: {
+              description: 'Mảng chứa một bản ghi tổng hợp.',
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'array',
+                    items: {
+                      type: 'object',
+                      properties: {
+                        IN_STOCK: { type: 'integer', minimum: 0, description: 'Đã nhập kho chính thức' },
+                        SEND_STOCK: { type: 'integer', minimum: 0, description: 'Đã gửi yêu cầu nhập kho' },
+                        WAITING_STOCK: { type: 'integer', minimum: 0, description: 'Đã kiểm IQC' },
+                        WAITING_IQC: { type: 'integer', minimum: 0, description: 'Chờ kiểm IQC' },
+                        NOT_ARRIVED: { type: 'integer', minimum: 0, description: 'Hàng chưa về nhà máy' },
+                        OVERDUE: { type: 'integer', minimum: 0, description: 'Lô hàng trễ hẹn' },
+                        DUE_SOON: { type: 'integer', minimum: 0, description: 'Dự kiến sắp về' },
+                        DUE_TODAY: { type: 'integer', minimum: 0, description: 'Dự kiến về hôm nay' },
+                        NOT_YET_DUE: { type: 'integer', minimum: 0, description: 'Chưa đến ngày giao' },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+            401: { description: 'Phiên đăng nhập không hợp lệ hoặc thiếu token.' },
+            429: { description: 'Vượt giới hạn đọc SQL.' },
+            503: { description: 'Hàng đợi SQL đang bận.' },
+          },
+        },
+      },
       '/api/warehouse/pos': {
         get: {
           tags: ['Pos'],
-          summary:
-            'Tim kiem + phan trang PO mo (gap PO + dong notice theo lot)',
-          description:
-            'Moi dong ket qua la 1 trong 2 loai (chia theo po + goods_no + lot_no): ' +
-            '(1) gap PO — phan chua co notice: qty = sheet_qty - noticed, ' +
-            'assignedQty = allocation chua match; (2) dong notice lot ' +
-            '(id = "<order2.id>-N<notice2.id>", lotNo = made_lot) — ' +
-            'qty = sheet_qty notice, assignedQty = allocation da match; ' +
-            'notice da nam trong pur_in bi loai THEO DONG (notice_id + goods_no). ' +
-            'Tu khoa khap so don / ma NPL / ten vat tu / nha cung cap. ' +
-            'Bucket theo ETA (2026-10-20, moc tinh theo NGAY CHAY server): ' +
-            'od1 = [ngay 1 thang truoc, hom nay), od2 = [ngay 1 cua 2 thang ' +
-            'truoc, ngay 1 thang truoc), od3p = cu hon (NULL del_date cung ' +
-            'thuoc od3p), next3 = [hom nay, +4 ngay), next7 = [+4, +8 ngay). ' +
-            'FILTER MOI (2026-10-20, ap dung ca items va bucketCounts): ' +
-            '(1) approved — bo PO chua duyet (order1.sheet_sta = 0); ' +
-            '(2) M1-M6 — chi NPL co goods_no bat dau M1..M6 (ITEM-* bi loai); ' +
-            '(3) keeper scope — KEEPER chi thay NPL duoc phan cong active ' +
-            '(whs_keeper_material_assignment, ended_at NULL); emp_no lay tu ' +
-            'SESSION, KHONG nhan tu query — MANAGER thay tat ca. ' +
-            'Tham so khong hop le tu ve mac dinh: bucket sai -> khong loc, ' +
-            'page < 1 -> 1, pageSize kem 5..100 (mac dinh 15). ' +
-            'Dong da gan het so luong bi loai khoi items va bucketCounts.',
+          summary: 'Tìm kiếm và phân trang danh sách PO',
+          description: 'Danh sách dùng điều kiện cố định của backend. Từ khóa tìm theo tiền tố mã PO, mã NPL, mã lô hoặc theo nội dung tên NPL và nhà cung cấp.',
           parameters: [
+            { name: 'keyword', in: 'query', schema: { type: 'string' } },
+            { name: 'page', in: 'query', schema: { type: 'integer', default: 1, minimum: 1 } },
+            { name: 'pageSize', in: 'query', schema: { type: 'integer', default: 15, minimum: 5, maximum: 100 } },
             {
-              name: 'keyword',
+              name: 'counts',
               in: 'query',
-              schema: { type: 'string' },
-              description: 'Tu khoa (so don / ma NPL / ten vat tu / nha cung cap)',
-            },
-            {
-              name: 'bucket',
-              in: 'query',
-              schema: {
-                type: 'string',
-                enum: ['overdue', 'od1', 'od2', 'od3p', 'next3', 'next7'],
-              },
-              description:
-                'Loc theo bucket ETA (gia tri khac = khong loc). Boundary: ' +
-                'od1 = [ngay 1 thang truoc, hom nay), od2 = [ngay 1 cua 2 ' +
-                'thang truoc, ngay 1 thang truoc), od3p cu hon (NULL cung od3p), ' +
-                'next3 = [hom nay, +4), next7 = [+4, +8) — tinh theo ngay chay.',
-            },
-            {
-              name: 'page',
-              in: 'query',
-              schema: { type: 'integer', default: 1, minimum: 1 },
-            },
-            {
-              name: 'pageSize',
-              in: 'query',
-              schema: { type: 'integer', default: 15, minimum: 5, maximum: 100 },
+              schema: { type: 'string', enum: ['0', '1'], default: '1' },
+              description: 'Gửi 0 để bỏ thống kê theo ngày dự kiến. Tổng số dòng và số PO vẫn được trả về.',
             },
           ],
           responses: {
             200: {
-              description: 'Danh sach PO con du + so don theo bucket ETA',
+              description: 'Trang danh sách PO.',
               content: {
                 'application/json': {
                   schema: { $ref: '#/components/schemas/PoLinePage' },
                 },
               },
             },
+            401: { description: 'Thiếu token hoặc phiên đăng nhập không hợp lệ.' },
+            429: { description: 'Vượt giới hạn đọc SQL.' },
+            503: { description: 'Hàng đợi SQL đang bận.' },
+          },
+        },
+      },
+      '/api/warehouse/pos/supllierLate': {
+        get: {
+          tags: ['Pos'],
+          summary: 'Lấy tối đa 10 PO giao trễ và chưa nhận đủ',
+          description: 'Gộp theo mã PO và sắp theo số ngày trễ giảm dần. Truy vấn xét các dòng PO kho 101, trong phạm vi ngày dự kiến của báo cáo.',
+          responses: {
+            200: {
+              description: 'Mảng PO giao trễ. Trả mảng rỗng khi không có PO khớp.',
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'array',
+                    maxItems: 10,
+                    items: {
+                      type: 'object',
+                      required: ['po_no', 'supplier_name', 'late_days', 'materials'],
+                      properties: {
+                        po_no: { type: 'string', example: 'POGI261014001' },
+                        supplier_name: { type: 'string', nullable: true },
+                        late_days: { type: 'integer', minimum: 1, example: 7 },
+                        materials: { type: 'string', nullable: true, description: 'Tên vật tư nối bằng dấu · theo thứ tự mã NPL.' },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+            401: { description: 'Thiếu token hoặc phiên đăng nhập không hợp lệ.' },
+            429: { description: 'Vượt giới hạn đọc SQL.' },
+            503: { description: 'Hàng đợi SQL đang bận.' },
           },
         },
       },

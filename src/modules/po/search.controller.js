@@ -32,4 +32,13 @@ const searchActivity = async (req, res) => {
   res.json(await SearchService.searchActivity(req.query));
 };
 
-module.exports = { searchPos, searchSlots, searchActivity };
+// lấy danh sách Po theo đếm tổng trạng thái
+const searchPosCount = async (req, res) => {
+  res.json(await SearchService.searchCountPoByStatus())
+}
+// nhà cung cấp giao chậm thiếu
+const supplierLate = async (req, res) => {
+  res.json(await SearchService.supplierLate())
+}
+
+module.exports = { searchPos, searchSlots, searchActivity, searchPosCount, supplierLate };
