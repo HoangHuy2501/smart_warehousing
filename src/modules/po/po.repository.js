@@ -459,8 +459,7 @@ class PoModel {
 
   // danh sách đếm đơn PO theo trạng thái
   async CountPoByStatus() {
-    try {
-      const result = await db.request().query(`
+    const { rows } = await db.query(`
         ;WITH PO_Base AS
         (
             SELECT o.id AS po_line_id, o.sheet_no, o.sheet_id, o.goods_no, o.del_date
@@ -486,11 +485,8 @@ class PoModel {
             COUNT(DISTINCT CASE WHEN notice_no IS NULL AND DATEDIFF(DAY, del_date, GETDATE()) = 0 THEN sheet_no END) AS [Lo hang du kien ve hom nay],
             COUNT(DISTINCT CASE WHEN notice_no IS NULL AND DATEDIFF(DAY, del_date, GETDATE()) < -3 THEN sheet_no END) AS [Lo hang chua giao]
         FROM PO_Status;
-        `)
-      return result.recordset;
-    } catch (error) {
-      throw error
-    }
+    `);
+    return rows;
   }
 
 }
