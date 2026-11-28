@@ -395,6 +395,7 @@ class PoModel {
           AND a.goods_no = o.goods_no
           AND a.closed_at IS NULL
       )
+    order by mat_no
     `;
     // Tìm theo từ khóa trên tập PO đủ điều kiện cố định.
     const query = `
@@ -472,33 +473,74 @@ class PoModel {
     const { rows } = await db.query(`
         ;WITH PO_Base AS
         (
-            SELECT o.id AS po_line_id, o.sheet_no, o.sheet_id, o.goods_no, o.del_date
+            SELECT 
+                o.id AS po_line_id, o.sheet_no,o.sheet_id, o.goods_no,o.del_date,n.sheet_no AS notice_no,n.sheet_sta1, i.sheet_no AS receipt_no,i.sheet_sta
             FROM pur_order2 o WITH (NOLOCK)
-            INNER JOIN pur_order1 o1 WITH (NOLOCK) ON o.sheet_no = o1.sheet_no and o.st_no=101
-            WHERE o.close_sw = 0 AND o.sheet_sta = 1 AND o1.close_sw = 0 AND DATEDIFF(DAY, o.del_date, GETDATE()) > -30 AND DATEDIFF(DAY, o.del_date, GETDATE()) < 30
-        ),
-        PO_Status AS
-        (
-            SELECT p.po_line_id, p.sheet_no, p.sheet_id, p.goods_no, p.del_date, n.sheet_no AS notice_no, n.sheet_sta1, i.sheet_no AS receipt_no, i.sheet_sta
-            FROM PO_Base p
-            LEFT JOIN pur_notice2 n WITH (NOLOCK) ON n.pur_no = p.sheet_no AND n.pur_id = p.sheet_id AND (n.adj_result <> 2 OR n.adj_result IS NULL)
-            LEFT JOIN pur_in2 i WITH (NOLOCK) ON i.notice_no = n.sheet_no AND i.notice_id = n.sheet_id
+            INNER JOIN pur_order1 o1 WITH (NOLOCK) ON o.sheet_no = o1.sheet_no
+            INNER JOIN bas_goods g WITH (NOLOCK)   ON g.goods_no = o.goods_no
+            INNER JOIN bas_goods_type gt WITH (NOLOCK) ON gt.goods_type = g.goods_type
+            LEFT JOIN pur_notice2 n WITH (NOLOCK) ON n.pur_no = o.sheet_no AND n.pur_id = o.sheet_id
+            LEFT JOIN pur_in2 i WITH (NOLOCK)  ON i.notice_no = n.sheet_no  AND i.notice_id = n.sheet_id
+            LEFT JOIN pur_plan2 pp WITH (NOLOCK) ON pp.sheet_no = o.plan_no  AND pp.sheet_id = o.plan_id
+            LEFT JOIN pur_plan1 pp1 WITH (NOLOCK)  ON pp1.sheet_no = pp.sheet_no
+            WHERE o.close_sw = 0 AND o.sheet_sta = 1 AND (n.adj_result <> 2 OR n.adj_result IS NULL)  AND o1.close_sw = 0 AND o.st_no = 101 AND pp.close_sw = 0
+                AND pp1.close_sw = 0  AND DATEDIFF(DAY, o.del_date, GETDATE()) BETWEEN -30 AND 30 AND LEFT(o.goods_no, 1) <> 'N'
         )
         SELECT
-            COUNT(DISTINCT CASE WHEN receipt_no IS NOT NULL AND sheet_sta = 1 THEN sheet_no END) AS [IN_STOCK], -- Đã nhập kho chính thức
-            COUNT(DISTINCT CASE WHEN receipt_no IS NOT NULL AND sheet_sta <> 1 THEN sheet_no END) AS [SEND_STOCK], -- Đã gửi yêu cầu nhập kho
-            COUNT(DISTINCT CASE WHEN notice_no IS NOT NULL AND sheet_sta1 = 1 THEN sheet_no END) AS [WAITING_STOCK], -- Đã kiểm IQC
-            COUNT(DISTINCT CASE WHEN notice_no IS NOT NULL AND sheet_sta1 <> 1 THEN sheet_no END) AS [WAITING_IQC], -- Chờ kiểm IQC
-            COUNT(DISTINCT CASE WHEN notice_no IS NULL THEN sheet_no END) AS [NOT_ARRIVED], -- Hàng chưa về nhà máy
-            COUNT(DISTINCT CASE WHEN notice_no IS NULL AND DATEDIFF(DAY, del_date, GETDATE()) > 0 THEN sheet_no END) AS [OVERDUE], -- Lô hàng trễ hẹn
-            COUNT(DISTINCT CASE WHEN notice_no IS NULL AND DATEDIFF(DAY, del_date, GETDATE()) BETWEEN -3 AND -1 THEN sheet_no END) AS [DUE_SOON], -- Dự kiến sắp về
-            COUNT(DISTINCT CASE WHEN notice_no IS NULL AND DATEDIFF(DAY, del_date, GETDATE()) = 0 THEN sheet_no END) AS [DUE_TODAY], -- Dự kiến về hôm nay
-            COUNT(DISTINCT CASE WHEN notice_no IS NULL AND DATEDIFF(DAY, del_date, GETDATE()) < -3 THEN sheet_no END) AS [NOT_YET_DUE] -- Chưa đến ngày giao
-        FROM PO_Status;
+            COUNT(DISTINCT CASE WHEN receipt_no IS NOT NULL AND sheet_sta = 1 THEN sheet_no END) AS [Đã nhập kho chính thức],
+            COUNT(DISTINCT CASE WHEN receipt_no IS NOT NULL AND sheet_sta <> 1 THEN sheet_no END) AS [Đã gửi yêu cầu nhập kho],
+            COUNT(DISTINCT CASE WHEN notice_no IS NOT NULL AND sheet_sta1 = 1 THEN sheet_no END) AS [Đã kiểm IQC],
+            COUNT(DISTINCT CASE WHEN notice_no IS NOT NULL AND sheet_sta1 <> 1 THEN sheet_no END) AS [Đang đợi kiểm IQC],
+            COUNT(DISTINCT CASE WHEN notice_no IS NULL THEN sheet_no END) AS [Hàng chưa về],
+            COUNT(DISTINCT CASE WHEN notice_no IS NULL AND DATEDIFF(DAY, del_date, GETDATE()) > 0 THEN sheet_no END) AS [Lô hàng trễ hẹn],
+            COUNT(DISTINCT CASE WHEN notice_no IS NULL AND DATEDIFF(DAY, del_date, GETDATE()) BETWEEN -3 AND -1 THEN sheet_no END) AS [Lô hàng dự kiến sắp về],
+            COUNT(DISTINCT CASE WHEN notice_no IS NULL  AND DATEDIFF(DAY, del_date, GETDATE()) = 0 THEN sheet_no END) AS [Lô hàng dự kiến về hôm nay],
+            COUNT(DISTINCT CASE  WHEN notice_no IS NULL  AND DATEDIFF(DAY, del_date, GETDATE()) < -3 THEN sheet_no END) AS [Lô hàng chưa giao]
+
+        FROM PO_Base;
     `);
     return rows;
   }
-
+  // nhà cung cấp giao chậm thiếu
+  async supplierLate() {
+    const { rows } = await db.query(`
+      ;WITH base AS (
+      SELECT  o.id AS po_line_id,o.sheet_no AS po_no, o.goods_no AS mat_no, g.goods_name AS mat_name, o1.su_name11 AS supplier,  o.sheet_qty AS po_qty, o.del_date AS su_reply_date,
+              ISNULL(n.sheet_qty, 0) + ISNULL(n.sheet_qty1, 0) AS rcv_qty
+      FROM pur_order2 o WITH (NOLOCK)
+      INNER JOIN pur_order1 o1 WITH (NOLOCK) ON o.sheet_no = o1.sheet_no
+      INNER JOIN bas_goods g WITH (NOLOCK) ON g.goods_no = o.goods_no
+      INNER JOIN bas_goods_type gt WITH (NOLOCK) ON gt.goods_type = g.goods_type
+      LEFT JOIN pur_notice2 n WITH (NOLOCK) ON n.pur_no = o.sheet_no AND n.pur_id = o.sheet_id
+      LEFT JOIN pur_notice1 n1 WITH (NOLOCK) ON n1.sheet_no = n.sheet_no
+      LEFT JOIN pur_in2 i WITH (NOLOCK) ON i.notice_no = n.sheet_no AND i.notice_id = n.sheet_id
+      LEFT JOIN pur_in1 i1 WITH (NOLOCK) ON i.sheet_no = i1.sheet_no
+      LEFT JOIN pur_plan2 p WITH (NOLOCK) ON p.sheet_no = o.plan_no AND p.sheet_id = o.plan_id
+      LEFT JOIN pur_plan1 p1 WITH (NOLOCK) ON p1.sheet_no = p.sheet_no
+      WHERE o.close_sw = 0
+        AND o.sheet_sta = 1 AND (n.adj_result <> 2 OR n.adj_result IS NULL)
+        AND o1.close_sw = 0 AND o.st_no = 101 AND p.close_sw = 0 AND p1.close_sw = 0
+        AND DATEDIFF(DAY, o.del_date, GETDATE()) BETWEEN -30 AND 30
+        AND LEFT(o.goods_no, 1) <> 'N'
+  ),
+  late_line AS (   -- gộp theo dòng PO để cộng dồn các đợt nhận
+      SELECT po_line_id, po_no, supplier, mat_no, mat_name, po_qty, su_reply_date,  SUM(rcv_qty) AS rcv_qty
+      FROM base
+      GROUP BY po_line_id, po_no, supplier, mat_no, mat_name, po_qty, su_reply_date
+      HAVING su_reply_date < CAST(GETDATE() AS date)   -- đã quá hạn
+        AND SUM(rcv_qty) < po_qty                     -- chưa về đủ
+  )
+  SELECT TOP 10
+        po_no, MAX(supplier) AS supplier_name,
+        MAX(DATEDIFF(DAY, su_reply_date, GETDATE())) AS late_days,                 -- badge "Chậm X ngày" 
+        STRING_AGG(CAST(mat_name AS nvarchar(max)), N' · ')
+              WITHIN GROUP (ORDER BY mat_no) AS materials                           -- dòng mô tả vật tư
+  FROM late_line
+  GROUP BY po_no
+  ORDER BY late_days DESC, po_no;
+      `)
+    return rows
+  }
 }
 
 module.exports = new PoModel();
