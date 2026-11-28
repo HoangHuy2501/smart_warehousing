@@ -346,15 +346,15 @@ class PoModel {
       case when n.sheet_qty > 0 then (n.return_qty/ n.sheet_qty) * 100 else 0 end as r_fail_qty,
       case when n.sheet_qty1 > 0 then (n.return_qty/ n.sheet_qty1) * 100 else 0 end as r_fail_foc_qty,
       case when (n.sheet_qty + n.sheet_qty) > 0 then ((n.return_qty + n.return_qty1)/ (n.sheet_qty + n.sheet_qty1)) * 100 else 0 end as r_total_fail_qty,
-      case when i.sheet_no is not null and i.sheet_sta = 1 then N'Da nhap ho chinh thuc'
-           when i.sheet_no is not null and i.sheet_sta <> 1 then N'Da gui yeu cau nhap kho chinh thuc'
-           when n.sheet_no is not null and n.sheet_sta1 = 1 then 'Da kiem IQC'
-           when n.sheet_no is not null and n.sheet_sta1 <> 1 then 'Dang doi kiem IQC'
-           when n.sheet_no is null then 'Hang chua ve nha may'
-           when datediff(day, o.del_date, getdate()) > 0 then 'Lo hang tre hen'
-           when datediff(day, o.del_date, getdate()) between -3 and -1 then 'Lo hang du kien sap ve'
-           when datediff(day, o.del_date, getdate()) = 0 then 'Lo hang du kien ve hom nay'
-           else 'Lo hang chua giao' end as status_po,
+      case when i.sheet_no is not null and i.sheet_sta = 1 then 'IN_STOCK' -- Đã nhập kho chính thức
+           when i.sheet_no is not null and i.sheet_sta <> 1 then 'SEND_STOCK' -- Đã gửi yêu cầu nhập kho
+           when n.sheet_no is not null and n.sheet_sta1 = 1 then 'WAITING_STOCK' -- Đã kiểm IQC
+           when n.sheet_no is not null and n.sheet_sta1 <> 1 then 'WAITING_IQC' -- Chờ kiểm IQC
+           when n.sheet_no is null then 'NOT_ARRIVED' -- Hàng chưa về nhà máy
+           when datediff(day, o.del_date, getdate()) > 0 then 'OVERDUE' -- Lô hàng trễ hẹn
+           when datediff(day, o.del_date, getdate()) between -3 and -1 then 'DUE_SOON' -- Dự kiến sắp về
+           when datediff(day, o.del_date, getdate()) = 0 then 'DUE_TODAY' -- Dự kiến về hôm nay
+           else 'NOT_YET_DUE' end as status_po, -- Chưa đến ngày giao
       CASE WHEN n.id IS NULL THEN CAST(o.id AS VARCHAR(40)) ELSE CONCAT(o.id, '-N', n.id) END AS [id],
       CAST(o.id AS VARCHAR(20)) AS [poLine],
       o.sheet_no AS [poNumber],
